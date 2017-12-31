@@ -1,5 +1,5 @@
 // Game's main entry point
-import GameEngine from './ecs-framework/gameEngine.mjs'
+import GameEngine from './js-game-engine/gameEngine.mjs'
 import ExampleSpawnerSystem from './exampleSpawnerSystem.mjs'
 import ExampleUpdateSystem from './exampleUpdateSystem.mjs'
 import ExamplePhysicsSystem from './examplePhysicsSystem.mjs'

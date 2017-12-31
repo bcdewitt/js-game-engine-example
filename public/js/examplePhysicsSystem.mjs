@@ -3,7 +3,7 @@
  * @module ExamplePhysicsSystem
  */
 
-import System from './ecs-framework/system.mjs'
+import System from './js-game-engine/system.mjs'
 
 const MAX_SPEED_X = 2.2
 const MAX_SPEED_Y = 4.1

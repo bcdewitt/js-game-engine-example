@@ -3,8 +3,8 @@
  * @module ExampleUpdateSystem
  */
 
-import InputManager from './ecs-framework/inputManager.mjs'
-import System from './ecs-framework/system.mjs'
+import InputManager from './js-game-engine/inputManager.mjs'
+import System from './js-game-engine/system.mjs'
 
 /** Class representing a particular type of System used for updating entities. Not intended to be part of final game engine.
  * @extends System

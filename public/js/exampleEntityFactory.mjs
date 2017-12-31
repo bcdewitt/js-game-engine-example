@@ -3,7 +3,7 @@
  * @module ExampleEntityFactory
  */
 
-import EntityFactory from './ecs-framework/entityFactory.mjs'
+import EntityFactory from './js-game-engine/entityFactory.mjs'
 
 // Import component classes
 import SpriteComponent from './components/spriteComponent.mjs'

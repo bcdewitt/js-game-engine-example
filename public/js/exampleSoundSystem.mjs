@@ -3,7 +3,7 @@
  * @module ExampleSoundSystem
  */
 
-import System from './ecs-framework/system.mjs'
+import System from './js-game-engine/system.mjs'
 
 const _playSound = Symbol('_playSound')
 const _time = Symbol('_time')

@@ -3,7 +3,7 @@
  * @module ExampleRenderSystem
  */
 
-import System from './ecs-framework/system.mjs'
+import System from './js-game-engine/system.mjs'
 
 /** Class representing a particular type of System used for Rendering. Not intended to be part of final game engine.
  * @extends System

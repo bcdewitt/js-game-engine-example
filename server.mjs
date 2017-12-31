@@ -5,7 +5,7 @@ import packageData from './package.json'
 
 const app = express()
 
-app.use('/js/ecs-framework', express.static('node_modules/ecs-framework'))
+app.use('/js/js-game-engine', express.static('/js-game-engine'))
 app.use(express.static('public'))
 
 app.listen(packageData.port, function () {

@@ -2,7 +2,7 @@ import includePaths from 'rollup-plugin-includepaths'
 
 const includePathOptions = {
 	include: {},
-	paths: ['node_modules'],
+	paths: ['node_modules', './'],
 	external: [],
 	extensions: ['.mjs']
 }
