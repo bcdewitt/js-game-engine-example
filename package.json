@@ -12,6 +12,7 @@
 		"doc": "jsdoc -c jsdoc.json"
 	},
 	"dependencies": {
+		"js-game-engine": "file: ./js-game-engine",
 		"@std/esm": "^0.18.0",
 		"express": "^4.16.2"
 	},
