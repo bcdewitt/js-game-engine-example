@@ -13,8 +13,7 @@ This README would normally document whatever steps are necessary to get your app
 ## How do I get set up? ##
 
 * Install node and pull the repo into a folder of your choice on your machine. Run `npm install` at the project root
-* The last step may have removed the "node_modules/ecs-framework" folder, be sure to restore those files (This will be fixed later)
-* You will also need to `cd node_modules/ecs-framework` and `npm install` there, too (This will eventually be put into its own repository)
+* You will also need to `cd node_modules/js-game-engine` and `npm install` there, too (Until this gets published to NPM)
 * Configuration (TBD)
 * Dependencies: (TBD)
 * Test Dependencies: (TBD)
@@ -24,6 +23,7 @@ This README would normally document whatever steps are necessary to get your app
 
 ## Contribution guidelines ##
 
+* NOTES: js-game-engine is now a subtree of this repository. If changes are made in this project
 * Writing tests: (TBD)
 * Code review (TBD)
 * Other guidelines (TBD)
