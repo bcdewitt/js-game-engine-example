@@ -23,7 +23,7 @@ This README would normally document whatever steps are necessary to get your app
 
 ## Contribution guidelines ##
 
-* NOTES: js-game-engine is now a subtree of this repository. If changes are made in this project
+* NOTES: js-game-engine is a subtree of this repository. If changes are made within the js-game-engine folder, please commit those changes separately
 * Writing tests: (TBD)
 * Code review (TBD)
 * Other guidelines (TBD)
