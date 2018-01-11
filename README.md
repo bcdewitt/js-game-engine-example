@@ -13,7 +13,6 @@ This README would normally document whatever steps are necessary to get your app
 ## How do I get set up? ##
 
 * Install node and pull the repo into a folder of your choice on your machine. Run `npm install` at the project root
-* You will also need to `cd node_modules/js-game-engine` and `npm install` there, too (Until this gets published to NPM)
 * Configuration (TBD)
 * Dependencies: (TBD)
 * Test Dependencies: (TBD)
