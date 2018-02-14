@@ -1,5 +1,6 @@
-(function () {
 'use strict';
+
+Object.defineProperty(exports, '__esModule', { value: true });
 
 /**
  * AssetUser module.
@@ -977,70 +978,103 @@ class System extends AssetUser {
 }
 
 /**
- * ExampleSpawnerSystem module.
- * @module ExampleSpawnerSystem
+ * Entity module.
+ * @module Entity
  */
 
+/** Class that represents an Entity (the "E" in the ECS design pattern). */
+class Entity {
 
-/** Class representing a particular type of System used for creating entities. Not intended to be part of final game engine.
- * @extends System
+	/**
+	 * Create an Entity.
+	 * @param  {function} compCallback - Function to call after a component is added/removed.
+	 */
+	constructor(compCallback) {
+		this.compCallback = compCallback;
+		this.components = {};
+	}
+
+	/**
+	 * Check if the given component exists for this Entity.
+	 * @param  {string} compName - Name of component.
+	 * @returns {boolean}  true if the given component exists for this Entity.
+	 */
+	hasComponent(compName) {
+		return this.components[compName] !== undefined
+	}
+
+	/**
+	 * Gets the component object for this Entity under the given name.
+	 * @param  {string} compName - Name of component.
+	 * @returns {Object|null}  Returns the component object under the given name.
+	 */
+	getComponent(compName) {
+		return this.components[compName]
+	}
+
+	/**
+	 * Adds a component object for this Entity under the given name.
+	 * @param  {string} compName - Name of component.
+	 * @param  {Object=} component - Plain-data Object.
+	 * @returns {Object|null}  Returns the component object added under the given name.
+	 */
+	addComponent(compName, component) {
+		if(!compName) { return }
+
+		this.components[compName] = component;
+
+		if(this.compCallback) {
+			this.compCallback(this);
+		}
+
+		return this.components[compName]
+	}
+
+	/**
+	 * Removes a component object from this Entity under the given name (if it exists).
+	 * @param  {string} compName - Name of component.
+	 */
+	removeComponent(compName) {
+		delete this.components[compName];
+
+		if(this.compCallback) {
+			this.compCallback(this);
+		}
+	}
+}
+
+/**
+ * EntityFactory module.
+ * @module EntityFactory
  */
-class ExampleSpawnerSystem extends System {
+
+/**
+ * Class that acts as an interface/abstract class for an EntityFactory. Please avoid instantiating directly.
+ * @interface
+ */
+class EntityFactory {
+
+	/**
+	 * Create an EntityFactory.
+	 */
 	constructor() {
-		super();
-		this.lastUpdate = null;
-	}
-
-	/**
-	 * Gets subset info (helps GameEngine with caching).
-	 * @returns {Object}  Plain object used as an associative array. It contains functions which check if a given entity meets criteria.
-	 */
-	getRequiredSubsets() {
-		return {
-			spawner: function(entity) {
-				return entity.hasComponent('spawner')
-			},
-			spawned: function(entity) {
-				return entity.hasComponent('spawned')
-			}
+		if (this.constructor === EntityFactory) {
+			throw new Error('Can\'t instantiate EntityFactory! (abstract class)')
 		}
 	}
 
 	/**
-	 * Method that is called once per iteration of the main game loop.
-	 * Renders map (and, in the future, Entity objects with sprite components).
-	 * @param  {DOMHighResTimeStamp} timestamp - Current time in milliseconds.
+	 * Create an Entity instance of the given type.
+	 * @param {string} entityType - Type of entity (key used to determine which constructor function to use to build entity).
+	 * @param {Object} data - Plain object that represents an entity's components.
+	 * @param  {function} compCallback - Function to call after a component is added/removed or other changes are made that need to be observed.
+	 * @returns  {Entity}  A single Entity instance.
 	 */
-	run(timestamp) {
-		this.lastUpdate = this.lastUpdate || timestamp;
-
-		// Get all spawners
-		let spawnerEntities = this.getEntities('spawner');
-
-		// Filter to only the spawners that are ready to spawn
-		let readySpawners = spawnerEntities.filter((spawnerEntity) => {
-			let ready = true;
-			let spawnedEntities = this.getEntities('spawned');
-			for(let spawnedEntity of spawnedEntities) {
-				if(spawnedEntity.getComponent('spawned').spawnerSource === spawnerEntity.getComponent('spawner').name) {
-					ready = false;
-					break
-				}
-			}
-			return ready
-		});
-
-		// Create a new spawned entity for each "ready" spawner
-		for(let readySpawner of readySpawners) {
-			let spawnerComp = readySpawner.getComponent('spawner');
-
-			this.addEntity(spawnerComp.entityType, {
-				x: spawnerComp.x,
-				y: spawnerComp.y,
-				spawnerSource: spawnerComp.name
-			});
+	create(entityType, data, compCallback) {
+		if(typeof data !== 'object' || data.constructor !== Object) {
+			throw new Error('Can\'t must use plain objects for data')
 		}
-
+		return new Entity(compCallback)
 	}
 }
 
@@ -1170,994 +1204,7 @@ class InputManager {
 	}
 }
 
-/**
- * ExampleUpdateSystem module.
- * @module ExampleUpdateSystem
- */
-
-/** Class representing a particular type of System used for updating entities. Not intended to be part of final game engine.
- * @extends System
- */
-class ExampleUpdateSystem extends System {
-	constructor() {
-		super();
-		this.lastUpdate = null;
-		this.maxUpdateRate = 60 / 1000;
-		this.inputManager = new InputManager();
-	}
-
-	/**
-	 * Gets subset info (helps GameEngine with caching).
-	 * @returns {Object}  Plain object used as an associative array. It contains functions which check if a given entity meets criteria.
-	 */
-	getRequiredSubsets() {
-		return {
-			player: function(entity) {
-				return entity.hasComponent('being') && entity.getComponent('being').type === 'Player'
-			}
-		}
-	}
-
-	/**
-	 * Method that is called once per iteration of the main game loop.
-	 * Renders map (and, in the future, Entity objects with sprite components).
-	 * @param  {DOMHighResTimeStamp} timestamp - Current time in milliseconds.
-	 */
-	run(timestamp) {
-		this.lastUpdate = this.lastUpdate || timestamp;
-		if(this.maxUpdateRate && timestamp - this.lastUpdate < this.maxUpdateRate) return
-
-		let playerEntities = this.getEntities('player');
-		for(let playerEntity of playerEntities) {
-			let c = playerEntity.getComponent('physicsBody');
-			let state = playerEntity.getComponent('state');
-			let sprite = playerEntity.getComponent('sprite');
-
-			if(this.inputManager.leftButton.held) {
-				c.accX = -0.2;
-				state.state = 'driving';
-				sprite.flipped = true;
-			} else if(this.inputManager.rightButton.held) {
-				c.accX = 0.2;
-				state.state = 'driving';
-				sprite.flipped = false;
-			} else {
-				c.accX = 0;
-				if(c.spdX === 0) state.state = 'idle';
-			}
-
-			if(state.state === 'driving') {
-				sprite.frame = (parseInt(c.x / 6) % 4) + 1;
-			}
-
-			if(this.inputManager.jumpButton.pressed && state.grounded) { c.spdY = -100; }
-		}
-
-		this.lastUpdate = timestamp;
-	}
-}
-
-/**
- * ExamplePhysicsSystem module.
- * @module ExamplePhysicsSystem
- */
-
-const MAX_SPEED_X = 2.2;
-const MAX_SPEED_Y = 4.1;
-const GRAVITY = 0.3;
-const FRICTION = 0.08;
-
-/** Class representing a particular type of System used for applying simple physics to entities. Not intended to be part of final game engine.
- * @extends System
- */
-class ExamplePhysicsSystem extends System {
-	constructor() {
-		super();
-		this.lastUpdate = null;
-		this.maxUpdateRate = 60 / 1000;
-	}
-
-	/**
-	 * Gets subset info (helps GameEngine with caching).
-	 * @returns {Object}  Plain object used as an associative array. It contains functions which check if a given entity meets criteria.
-	 */
-	getRequiredSubsets() {
-		return {
-			staticPhysicsBody: function(entity) {
-				return entity.hasComponent('staticPhysicsBody')
-			},
-			physicsBody: function(entity) {
-				return entity.hasComponent('physicsBody')
-			}
-		}
-	}
-
-	/**
-	 * Method that is called once per iteration of the main game loop.
-	 * Renders map (and, in the future, Entity objects with sprite components).
-	 * @param  {DOMHighResTimeStamp} timestamp - Current time in milliseconds.
-	 */
-	run(timestamp) {
-		this.lastUpdate = this.lastUpdate || timestamp;
-		let deltaTime = timestamp - this.lastUpdate;
-		if(this.maxUpdateRate && deltaTime < this.maxUpdateRate) return
-
-		let staticEntities = this.getEntities('staticPhysicsBody');
-		let nonstaticEntities = this.getEntities('physicsBody');
-
-		// For every nonstatic physics body, check for static physics body collision
-		for(let nonstaticEntity of nonstaticEntities) {
-			let c = nonstaticEntity.getComponent('physicsBody');
-			let state = nonstaticEntity.getComponent('state');
-			let wasGrounded = state.grounded;
-			state.grounded = false; // Only set to true after a collision is detected
-
-			c.accY = GRAVITY; // Add gravity (limit to 10)
-
-			// Add acceleration to "speed"
-			let time = deltaTime / 10;
-			c.spdX = c.spdX + (c.accX / time);
-			c.spdY = c.spdY + (c.accY / time);
-
-			// Limit speed
-			c.spdX = c.spdX >= 0 ? Math.min(c.spdX, MAX_SPEED_X) : Math.max(c.spdX, MAX_SPEED_X * -1);
-			c.spdY = c.spdY >= 0 ? Math.min(c.spdY, MAX_SPEED_Y) : Math.max(c.spdY, MAX_SPEED_Y * -1);
-
-			// Use speed to change position
-			c.x += c.spdX;
-			c.y += c.spdY;
-
-			for(let staticEntity of staticEntities) {
-				let c2 = staticEntity.getComponent('staticPhysicsBody');
-
-				let halfWidthSum = c.halfWidth + c2.halfWidth;
-				let halfHeightSum = c.halfHeight + c2.halfHeight;
-				let deltaX = c2.midPointX - c.midPointX;
-				let deltaY = c2.midPointY - c.midPointY;
-				let absDeltaX = Math.abs(deltaX);
-				let absDeltaY = Math.abs(deltaY);
-
-				// Collision Detection
-				if(
-					(halfWidthSum > absDeltaX) &&
-					(halfHeightSum > absDeltaY)
-				) {
-					let projectionY = halfHeightSum - absDeltaY; // Value used to correct positioning
-					let projectionX = halfWidthSum - absDeltaX;  // Value used to correct positioning
-
-					// Use the lesser of the two projection values
-					if(projectionY < projectionX) {
-						if(deltaY > 0) projectionY *= -1;
-						// alert('move along y axis: ' + projectionY)
-						c.y += projectionY; // Apply "projection vector" to rect1
-						if(c.spdY > 0 && deltaY > 0) c.spdY = 0;
-						if(c.spdY < 0 && deltaY < 0) c.spdY = 0;
-
-						if(projectionY < 0) {
-							if(!wasGrounded) { state.groundHit = true; } else { state.groundHit = false; }
-							state.grounded = true;
-							if(c.spdX > 0) {
-								c.spdX = Math.max(c.spdX - (FRICTION / time), 0);
-							} else {
-								c.spdX = Math.min(c.spdX + (FRICTION / time), 0);
-							}
-						}
-					} else {
-						if(deltaX > 0) projectionX *= -1;
-						// alert('move along x axis: ' + projectionX)
-						c.x += projectionX; // Apply "projection vector" to rect1
-						if(c.spdX > 0 && deltaX > 0) c.spdX = 0;
-						if(c.spdX < 0 && deltaX < 0) c.spdX = 0;
-					}
-				}
-			}
-		}
-
-
-
-		this.lastUpdate = timestamp;
-	}
-}
-
-/**
- * ExampleSoundSystem module.
- * @module ExampleSoundSystem
- */
-
-const _playSound = Symbol('_playSound');
-const _time = Symbol('_time');
-
-class TimeOffset {
-	constructor(timeStr, millisecondsMode) {
-		this[_time] = timeStr;
-		this.msMode = millisecondsMode || false;
-	}
-	valueOf() {
-		let val = 0;
-		let arr = this[_time].split(':');
-		arr.reverse();
-
-		if(arr[3]) { throw Error('Bad TimeOffset string') }
-		if(arr[2]) { val += (+arr[2] * 3600000); }
-		if(arr[1]) { val += (+arr[1] * 60000); }
-		if(arr[0]) { val += (+arr[0] * 1000); }
-
-		if(!this.msMode) return val / 1000
-
-		return val
-	}
-	toBoolean() {
-		return !!this.valueOf()
-	}
-}
-
-// This is a fix (just in case we only have the webkit prefixed version)
-window.AudioContext = window.AudioContext || window.webkitAudioContext;
-
-/** Class representing a particular type of System used for playing sound effects and music. Not intended to be part of final game engine.
- * @param {TiledMap} map - The loaded map.
- */
-class ExampleSoundSystem extends System {
-	constructor(map) {
-		super();
-		this.lastUpdate = null;
-		this.maxUpdateRate = 60 / 1000;
-		this.map = map;
-		this.context = new AudioContext();
-		this.tracks = {};
-		this.bgmPlay = false;
-		this.bgmLoopTarget = new TimeOffset(map.bgmLoopTarget);
-
-		this.masterVolume = 1;
-	}
-
-	/**
-	 * Gets subset info (helps GameEngine with caching).
-	 * @returns {Object}  Plain object used as an associative array. It contains functions which check if a given entity meets criteria.
-	 */
-	getRequiredSubsets() {
-		return {
-			camera: function(entity) {
-				return entity.hasComponent('camera')
-			},
-			sound: function(entity) {
-				return entity.hasComponent('sound')
-			}
-		}
-	}
-
-	/**
-	 * @returns {array}  Array of path strings or plain objects with a "path" and "reviver" function (for JSON).
-	 */
-	getAssetPaths() {
-		return [
-			'sfx/sfx1.wav'
-		]
-	}
-
-	/**
-	 * Event handler function - Store downloaded assets.
-	 * @param {Object} assets - Plain object that works as an associative array. Each item key is a path from "getAssetPaths()".
-	 */
-	onAssetsLoaded(assets) {
-		let callback = () => {
-			super.onAssetsLoaded();
-		};
-
-		if(this.map.bgm) {
-			this.bgmPlay = true;
-			assets['bgm'] = this.map.bgm;
-		}
-
-		let total = Object.keys(assets).length;
-
-		let count = 0;
-		for(let key in assets) {
-			let asset = assets[key];
-
-			this.context.decodeAudioData(asset, (decodedData) => {
-				this.tracks[key] = decodedData;
-
-				count++;
-				if(count >= total) {
-					callback();
-					return
-				}
-			});
-		}
-
-		this.processing = true; // prevents engine from continuously trying to load assets while we are processing
-	}
-
-	[_playSound](src, startAt, loopAt, callback) {
-		let sound = this.tracks[src];
-		let source = this.context.createBufferSource();
-
-		source.buffer = sound;
-		if(callback) { source.onended = callback; }
-		let gainNode = this.context.createGain();
-		gainNode.gain.value = 1;
-
-		source.connect(gainNode);
-		gainNode.connect(this.context.destination);
-
-		if(loopAt) {
-			source.loopStart = loopAt % sound.duration;
-			source.loopEnd = sound.duration;
-			source.loop = !!loopAt;
-		}
-
-		source.start(this.context.currentTime + 0.05, startAt || 0); // first param is "time before playing" (in seconds)
-
-		return {
-			gainNode: gainNode
-		}
-	}
-
-	/**
-	 * Method that is called once per iteration of the main game loop.
-	 * Renders map (and, in the future, Entity objects with sprite components).
-	 * @param  {DOMHighResTimeStamp} timestamp - Current time in milliseconds.
-	 */
-	run(timestamp) {
-		this.lastUpdate = this.lastUpdate || timestamp;
-
-		if(this.processing) return
-
-		let deltaTime = timestamp - this.lastUpdate;
-		if(this.maxUpdateRate && deltaTime < this.maxUpdateRate) return
-
-		if(this.bgmPlay) {
-			this.bgmPlay = false;
-			this[_playSound]('bgm', 0, this.bgmLoopTarget);
-		}
-
-		let soundEntities = this.getEntities('sound');
-		for(let soundEntity of soundEntities) {
-			let c = soundEntity.getComponent('sound');
-			let state = soundEntity.getComponent('state');
-
-			// Sound conditions
-			if(soundEntity.hasComponent('being')) {
-				let type = soundEntity.getComponent('being').type;
-				if(type === 'Player' && state.groundHit) {
-					c.src = 'sfx/sfx1.wav';
-					c.play = true;
-				}
-			}
-
-			// Determine distance from soundEntity to cameraCenter
-			let distanceToCamCenter = 0;
-			let radius = 0;
-			let cameraEntities = this.getEntities('camera');
-			for(let cameraEntity of cameraEntities) {
-				let cam = cameraEntity.getComponent('camera');
-				let a = (c.x - cam.mapCenterX);
-				let b = (c.y - cam.mapCenterY);
-				let currentDist = Math.sqrt((a*a) + (b*b));
-				let currentRad = Math.min(cam.mapHalfWidth, cam.mapHalfHeight);
-
-				distanceToCamCenter = !distanceToCamCenter ?
-					currentDist :
-					Math.min(distanceToCamCenter, currentDist);
-
-				radius = !radius ?
-					currentRad :
-					Math.min(radius, currentRad);
-			}
-
-			// Play
-			if(c.play && c.src) {
-				c.gainNode = this[_playSound](c.src, 0, 0).gainNode;
-				c.play = false;
-			}
-
-			// Adjust the sound gain depending on the volume setting and the sound distance...
-			if(c.gainNode) {
-				if(distanceToCamCenter <= radius) {
-					c.gainNode.gain.value = c.volume;
-				} else if(distanceToCamCenter - radius >= radius * 2) {
-					c.gainNode.gain.value = 0;
-				} else {
-					let calc = ((distanceToCamCenter - radius) / (radius * 2)) * c.volume;
-					c.gainNode.gain.value = calc;
-				}
-			}
-
-		}
-
-		this.lastUpdate = timestamp;
-	}
-}
-
-/**
- * ExampleRenderSystem module.
- * @module ExampleRenderSystem
- */
-
-/** Class representing a particular type of System used for Rendering. Not intended to be part of final game engine.
- * @extends System
- */
-class ExampleRenderSystem extends System {
-
-	/**
-	 * Create a System used for Rendering.
-	 * @param {TiledMap} map - The loaded map.
-	 * @param {EntityFactory} entityFactory - Instance of an EntityFactory. Used when calling addEntity() method.
-	 */
-	constructor(map) {
-		super();
-		this.maxFramerate = 60/1000;
-		this.lastUpdate = 0;
-		this.canvas = document.getElementById('game');
-		this.context = this.canvas && this.canvas.getContext('2d');
-
-		this.context.mozImageSmoothingEnabled = false;
-		this.context.msImageSmoothingEnabled = false;
-		this.context.imageSmoothingEnabled = false;
-
-		this.map = map;
-		this.images = {};
-		this.frames = [
-			{
-				img: 'img/monster.png',
-				x: 0,
-				y: 0,
-				width: 14,
-				height: 26
-			}, {
-				img: 'img/tankSheet.png',
-				x: 0,
-				y: 0,
-				width: 26,
-				height: 18
-			}, {
-				img: 'img/tankSheet.png',
-				x: 26,
-				y: 0,
-				width: 26,
-				height: 18
-			}, {
-				img: 'img/tankSheet.png',
-				x: 52,
-				y: 0,
-				width: 26,
-				height: 18
-			}, {
-				img: 'img/tankSheet.png',
-				x: 78,
-				y: 0,
-				width: 26,
-				height: 18
-			}
-		];
-	}
-
-	/**
-	 * Gets subset info (helps GameEngine with caching).
-	 * @returns {Object}  Plain object used as an associative array. It contains functions which check if a given entity meets criteria.
-	 */
-	getRequiredSubsets() {
-		return {
-			camera: function(entity) {
-				return entity.hasComponent('camera')
-			},
-			sprite: function(entity) {
-				return entity.hasComponent('sprite')
-			},
-			player: function(entity) {
-				return entity.hasComponent('being') && entity.getComponent('being').type === 'Player'
-			}
-		}
-	}
-
-	/**
-	 * @returns {array}  Array of path strings or plain objects with a "path" and "reviver" function (for JSON).
-	 */
-	getAssetPaths() {
-		return [
-			'img/monster.png',
-			'img/tankSheet.png'
-		]
-	}
-
-	/**
-	 * Event handler function - Store downloaded assets.
-	 * @param {Object} assets - Plain object that works as an associative array. Each item key is a path from "getAssetPaths()".
-	 */
-	onAssetsLoaded(assets) {
-		let images = assets; // All assets requested are images...so this is simple
-
-		this.images = images;
-		this.flippedImages = {};
-
-		// Images must be flipped and stored in flippedImages under same key
-		for(let key in images) {
-			let canvas = document.createElement('canvas');
-			let ctx = canvas.getContext('2d');
-			let image = images[key];
-
-			canvas.width = image.width;
-			canvas.height = image.height;
-
-			ctx.scale(-1, 1); // flip
-			ctx.drawImage(image, (-1 * canvas.width), 0); // draw flipped
-
-			this.flippedImages[key] = canvas;
-		}
-
-		this.addEntity('Camera', {
-			x: 0,
-			y: 0,
-			width: this.canvas.width,
-			height: this.canvas.height,
-			mapX: 300,
-			mapY: 820,
-			mapWidth: parseInt(this.canvas.width / 8),
-			mapHeight: parseInt(this.canvas.height / 8),
-			following: null
-		});
-		/*
-		this.addEntity('Camera', {
-			x: this.canvas.width / 2,
-			y: 0,
-			width: this.canvas.width / 2,
-			height: this.canvas.height,
-			mapX: 100,
-			mapY: 920,
-			mapWidth: this.canvas.width / 2,
-			mapHeight: this.canvas.height / 2
-		})
-		*/
-		super.onAssetsLoaded();
-	}
-
-	/**
-	 * Method that is called once per iteration of the main game loop.
-	 * Renders map (and, in the future, Entity objects with sprite components).
-	 * @param  {DOMHighResTimeStamp} timestamp - Current time in milliseconds.
-	 */
-	run(timestamp) {
-
-		// Limit drawing operations to 60 times per second
-		if(this.maxFramerate && timestamp - this.lastUpdate < this.maxFramerate) return
-
-		this.context.clearRect(0, 0, this.canvas.width, this.canvas.height);
-
-		let players = this.getEntities('player');
-
-		// Get each camera
-		let cameraEntities = this.getEntities('camera');
-		for(let cameraEntity of cameraEntities) {
-			let c = cameraEntity.getComponent('camera');
-
-			// Set up drawing layers
-			let layers = {
-				Background: { sprites: [] },
-				Platforms:  { sprites: [] },
-				Player:     { sprites: [] }
-			};
-
-			// Force camera to match followed entity
-			if(!c.following && players && players[0]) { c.following = players[0]; }
-			if(c.following) {
-				let sprite = c.following.getComponent('sprite');
-				let frame = this.frames[sprite.frame];
-				c.mapX = sprite.x + (frame.width / 2) - (c.mapWidth / 2);
-
-				let threshold = (c.mapHeight / 4);
-				if(sprite.y < c.mapY + threshold) {
-					c.mapY = sprite.y - threshold;
-				} else if((sprite.y + sprite.height) > c.mapY + c.mapHeight - threshold) {
-					c.mapY = sprite.y + sprite.height - (c.mapHeight - threshold);
-				}
-			}
-
-			// Get entities with a sprite component and add to the appropriate layer for rendering
-			let entities = this.getEntities('sprite');
-			for(let entity of entities) {
-				let sprite = entity.getComponent('sprite');
-				let frame = this.frames[sprite.frame];
-				let img = !sprite.flipped ? this.images[frame.img] : this.flippedImages[frame.img];
-
-				sprite.width = frame.width;
-				sprite.height = frame.height;
-
-				let obj = {
-					img: img,
-					x: sprite.x - c.mapX,
-					y: sprite.y - c.mapY,
-					width: frame.width,
-					height: frame.height,
-					sx: frame.x,
-					sy: frame.y
-				};
-
-				if(
-					obj.x + obj.width > 0 && obj.x < c.mapWidth &&
-					obj.y + obj.height > 0 && obj.y < c.mapHeight
-				) {
-					layers[sprite.layer].sprites.push(obj);
-				}
-			}
-
-			// Draw each map layer (include all sprites for that layer)
-			for(let layerKey in layers) {
-				let layer = layers[layerKey];
-
-				let mapX = Math.round(c.mapX);
-				let mapY = Math.round(c.mapY);
-				let mapWidth = parseInt(c.mapWidth);
-				let mapHeight = parseInt(c.mapHeight);
-				let x = parseInt(c.x);
-				let y = parseInt(c.y);
-				let width = parseInt(c.width);
-				let height = parseInt(c.height);
-
-				this.map.render(this.context, layerKey, timestamp, mapX, mapY, mapWidth, mapHeight, x, y, width, height);
-
-				// Draw each sprite to a temporary canvas
-				if(layer.sprites.length > 0) {
-					let tempCanvas = document.createElement('canvas');
-					tempCanvas.width = mapWidth;
-					tempCanvas.height = mapHeight;
-					let tempCtx = tempCanvas.getContext('2d');
-					for(let sprite of layer.sprites) {
-						tempCtx.drawImage(sprite.img, parseInt(sprite.sx), parseInt(sprite.sy), parseInt(sprite.width), parseInt(sprite.height), Math.round(sprite.x), Math.round(sprite.y), parseInt(sprite.width), parseInt(sprite.height));
-					}
-
-					// Draw the temporary canvas to the main canvas (position and fit to camera bounds)
-					this.context.drawImage(tempCanvas, 0, 0, mapWidth, mapHeight, x, y, width, height);
-				}
-			}
-		}
-
-		this.lastUpdate = timestamp;
-
-	}
-}
-
-/**
- * Entity module.
- * @module Entity
- */
-
-/** Class that represents an Entity (the "E" in the ECS design pattern). */
-class Entity {
-
-	/**
-	 * Create an Entity.
-	 * @param  {function} compCallback - Function to call after a component is added/removed.
-	 */
-	constructor(compCallback) {
-		this.compCallback = compCallback;
-		this.components = {};
-	}
-
-	/**
-	 * Check if the given component exists for this Entity.
-	 * @param  {string} compName - Name of component.
-	 * @returns {boolean}  true if the given component exists for this Entity.
-	 */
-	hasComponent(compName) {
-		return this.components[compName] !== undefined
-	}
-
-	/**
-	 * Gets the component object for this Entity under the given name.
-	 * @param  {string} compName - Name of component.
-	 * @returns {Object|null}  Returns the component object under the given name.
-	 */
-	getComponent(compName) {
-		return this.components[compName]
-	}
-
-	/**
-	 * Adds a component object for this Entity under the given name.
-	 * @param  {string} compName - Name of component.
-	 * @param  {Object=} component - Plain-data Object.
-	 * @returns {Object|null}  Returns the component object added under the given name.
-	 */
-	addComponent(compName, component) {
-		if(!compName) { return }
-
-		this.components[compName] = component;
-
-		if(this.compCallback) {
-			this.compCallback(this);
-		}
-
-		return this.components[compName]
-	}
-
-	/**
-	 * Removes a component object from this Entity under the given name (if it exists).
-	 * @param  {string} compName - Name of component.
-	 */
-	removeComponent(compName) {
-		delete this.components[compName];
-
-		if(this.compCallback) {
-			this.compCallback(this);
-		}
-	}
-}
-
-/**
- * EntityFactory module.
- * @module EntityFactory
- */
-
-/**
- * Class that acts as an interface/abstract class for an EntityFactory. Please avoid instantiating directly.
- * @interface
- */
-class EntityFactory {
-
-	/**
-	 * Create an EntityFactory.
-	 */
-	constructor() {
-		if (this.constructor === EntityFactory) {
-			throw new Error('Can\'t instantiate EntityFactory! (abstract class)')
-		}
-	}
-
-	/**
-	 * Create an Entity instance of the given type.
-	 * @param {string} entityType - Type of entity (key used to determine which constructor function to use to build entity).
-	 * @param {Object} data - Plain object that represents an entity's components.
-	 * @param  {function} compCallback - Function to call after a component is added/removed or other changes are made that need to be observed.
-	 * @returns  {Entity}  A single Entity instance.
-	 */
-	create(entityType, data, compCallback) {
-		if(typeof data !== 'object' || data.constructor !== Object) {
-			throw new Error('Can\'t must use plain objects for data')
-		}
-		return new Entity(compCallback)
-	}
-}
-
-const _x = Symbol('_x');
-const _y = Symbol('_y');
-const _width = Symbol('_width');
-const _height = Symbol('_height');
-
-class SpriteComponent {
-	constructor(x, y, width, height, frame, layer) {
-		this.x = x;
-		this.y = y;
-		this.width = width;
-		this.height = height;
-		this.frame = frame;
-		this.layer = layer;
-		this.flipped = false;
-	}
-	get x() {
-		return this[_x]
-	}
-	set x(val) {
-		this[_x] = val;
-		this.midPointX = val + this.halfWidth;
-	}
-
-	get y() {
-		return this[_y]
-	}
-	set y(val) {
-		this[_y] = val;
-		this.midPointY = val + this.halfHeight;
-	}
-
-	get width() {
-		return this[_width]
-	}
-	set width(val) {
-		this[_width] = val;
-		this.halfWidth = val / 2;
-		this.midPointX = this.x + this.halfWidth;
-	}
-
-	get height() {
-		return this[_height]
-	}
-	set height(val) {
-		this[_height] = val;
-		this.halfHeight = val / 2;
-		this.midPointY = this.y + this.halfHeight;
-	}
-}
-
-const _entity = Symbol('_x');
-const _spriteComp = Symbol('_x');
-
-class SpritePhysicsComponent {
-	constructor(entity) {
-		this[_entity] = entity;
-		this.accX = 0;
-		this.accY = 0;
-		this.spdX = 0;
-		this.spdY = 0;
-	}
-	get [_spriteComp]() { return this[_entity].getComponent('sprite') }
-	get x() { return this[_spriteComp].x }
-	set x(val) { this[_spriteComp].x = val; }
-	get y() { return this[_spriteComp].y }
-	set y(val) { this[_spriteComp].y = val; }
-	get width() { return this[_spriteComp].width }
-	set width(val) { this[_spriteComp].width = val; }
-	get height() { return this[_spriteComp].height }
-	set height(val) { this[_spriteComp].height = val; }
-	get midPointX() { return this[_spriteComp].midPointX }
-	set midPointX(val) { this[_spriteComp].midPointX = val; }
-	get midPointY() { return this[_spriteComp].midPointY }
-	set midPointY(val) { this[_spriteComp].midPointY = val; }
-	get halfWidth() { return this[_spriteComp].halfWidth }
-	set halfWidth(val) { this[_spriteComp].halfWidth = val; }
-	get halfHeight() { return this[_spriteComp].halfHeight }
-	set halfHeight(val) { this[_spriteComp].halfHeight = val; }
-}
-
-const _entity$1 = Symbol('_entity');
-const _spriteComp$1 = Symbol('_spriteComp');
-const _x$1 = Symbol('_x');
-const _y$1 = Symbol('_y');
-const _followSprite = Symbol('_followSprite');
-const gainNodeMap = new WeakMap();
-
-class SpriteSoundComponent {
-	constructor(src, entity) {
-		this[_entity$1] = entity;
-		this.src = src;
-		this.play = false;
-		this.volume = 1;
-		this[_followSprite] = true;
-	}
-	get [_spriteComp$1]() { return this[_entity$1].getComponent('sprite') }
-	get followSprite() { return this[_followSprite] }
-	set followSprite(val) {
-		if(this[_followSprite] && !val) {
-			this.x = this[_spriteComp$1].midPointX;
-			this.y = this[_spriteComp$1].midPointY;
-		}
-		this[_followSprite] = val;
-	}
-	get x() { return this.followSprite ? this[_spriteComp$1].midPointX : this[_x$1] }
-	set x(val) { this[_x$1] = val; }
-	get y() { return this.followSprite ? this[_spriteComp$1].midPointY : this[_y$1] }
-	set y(val) { this[_y$1] = val; }
-	set gainNode(val) {
-		gainNodeMap.set(this, val);
-	}
-	get gainNode() {
-		return gainNodeMap.get(this)
-	}
-}
-
-const _state = Symbol('_symbol');
-
-class StateComponent {
-	constructor(initialState) {
-		this[_state] = null;
-		this.lastState = null;
-		this.lastUpdate = null;
-		this.grounded = false;
-		this.groundHit = false;
-		this.state = initialState;
-	}
-	get state() {
-		return this[_state]
-	}
-	set state(val) {
-		this.lastState = this[_state];
-		this[_state] = val;
-		this.lastUpdate = window.performance.now();
-	}
-}
-
-/**
- * ExampleEntityFactory module.
- * @module ExampleEntityFactory
- */
-
-// Import component classes
-/** Class representing a particular implementation of an EntityFactory. Not intended to be part of final game engine.
- * @extends EntityFactory
- */
-class ExampleEntityFactory extends EntityFactory {
-
-	/**
-	 * Create an Entity instance of the given type.
-	 * @param {string} entityType - Type of entity (key used to determine which constructor function to use to build entity).
-	 * @param {Object} data - Plain object that represents an entity's components.
-	 * @param {function} compCallback - Function to call after a component is added/removed or other changes are made that need to be observed.
-	 * @returns {Entity}  A single Entity instance.
-	 */
-	create(entityType, data, compCallback) {
-		let entity = super.create(entityType, data, compCallback);
-		switch(entityType) {
-			case 'Camera':
-				entity.addComponent('camera', {
-					x: data.x,
-					y: data.y,
-					width: data.width,
-					height: data.height,
-					mapX: data.mapX,
-					mapY: data.mapY,
-					mapWidth: data.mapWidth,
-					mapHeight: data.mapHeight,
-					get mapHalfWidth() { return this.mapWidth / 2 },
-					get mapHalfHeight() { return this.mapHeight / 2 },
-					get mapCenterX() { return this.mapX + this.mapHalfWidth },
-					get mapCenterY() { return this.mapY + this.mapHalfHeight },
-					following: data.following
-				});
-				break
-			case 'Collision':
-				entity.addComponent('staticPhysicsBody', {
-					x: data.x,
-					y: data.y,
-					width: data.width,
-					height: data.height,
-					halfWidth: data.width / 2,
-					halfHeight: data.height / 2,
-					midPointX: data.x + (data.width / 2),
-					midPointY: data.y + (data.height / 2)
-				});
-				break
-			case 'PlayerSpawner':
-				entity.addComponent('spawner', {
-					entityType: 'Player',
-					x: data.x,
-					y: data.y,
-					name: data.name
-				});
-				break
-			case 'EntitySpawner':
-				entity.addComponent('spawner', {
-					entityType: 'Monster',
-					x: data.x,
-					y: data.y,
-					name: data.name
-				});
-				break
-			case 'Player':
-			case 'Monster':
-				entity.addComponent('spawned', {
-					spawnerSource: data.spawnerSource
-				});
-				entity.addComponent('being', {
-					type: entityType
-				});
-				entity.addComponent('state', new StateComponent('idle'));
-				entity.addComponent('sprite', new SpriteComponent(
-					data.x,
-					data.y,
-					data.width,
-					data.height,
-					(entityType === 'Player' ? 1 : 0),
-					(entityType === 'Player' ? 'Player' : 'Platforms')
-				));
-				entity.addComponent('physicsBody', new SpritePhysicsComponent(entity));
-				entity.addComponent('sound', new SpriteSoundComponent(null, entity));
-		}
-		return entity
-	}
-}
-
-// Game's main entry point
-class ExampleGameEngine extends GameEngine {
-	addSystems() {
-		this.addSystem('spawn', new ExampleSpawnerSystem());
-		this.addSystem('update', new ExampleUpdateSystem());
-		this.addSystem('physics', new ExamplePhysicsSystem());
-		this.addSystem('render', new ExampleRenderSystem(this.map));
-		this.addSystem('sound', new ExampleSoundSystem(this.map));
-		super.addSystems();
-	}
-}
-
-const game = new ExampleGameEngine('json/level3.json', new ExampleEntityFactory());
-game.run();
-
-}());
+exports.GameEngine = GameEngine;
+exports.System = System;
+exports.EntityFactory = EntityFactory;
+exports.InputManager = InputManager;

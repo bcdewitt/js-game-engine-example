@@ -5,7 +5,7 @@ import packageData from './package.json'
 
 const app = express()
 
-app.use('/js/js-game-engine', express.static('js-game-engine'))
+app.use('/js/js-game-engine', express.static('js-game-engine/src'))
 app.use(express.static('public'))
 
 app.listen(packageData.port, function () {

@@ -1,12 +1,13 @@
 {
-	"name": "ecs-game",
+	"private": true,
+	"name": "js-game-engine-example",
 	"version": "0.0.1",
 	"main": "server.mjs",
 	"description": "This README would normally document whatever steps are necessary to get your application up and running.",
 	"port": 3030,
 	"scripts": {
-		"start": "NODE_ENV=production node -r @std/esm server.mjs",
-		"start-dev": "nodemon -r @std/esm server.mjs",
+		"start": "set NODE_ENV=production && node -r @std/esm server.mjs",
+		"watch": "nodemon --exec \"npm run build & node -r @std/esm server.mjs\" -e mjs",
 		"build": "rollup -c",
 		"lint": "eslint . --ext .mjs --ignore-path .gitignore",
 		"doc": "jsdoc -c jsdoc.json"
