@@ -1,22 +1,15 @@
-// Game's main entry point
-import GameEngine from './js-game-engine/gameEngine.mjs'
-import ExampleSpawnerSystem from './exampleSpawnerSystem.mjs'
-import ExampleUpdateSystem from './exampleUpdateSystem.mjs'
-import ExamplePhysicsSystem from './examplePhysicsSystem.mjs'
-import ExampleSoundSystem from './exampleSoundSystem.mjs'
-import ExampleRenderSystem from './exampleRenderSystem.mjs'
-import ExampleGameEntityFactory from './exampleEntityFactory.mjs'
+import Game from './js-game-engine/esm/index.mjs'
+import createSceneFactory from './sceneFactory.mjs'
 
-class ExampleGameEngine extends GameEngine {
-	addSystems() {
-		this.addSystem('spawn', new ExampleSpawnerSystem())
-		this.addSystem('update', new ExampleUpdateSystem())
-		this.addSystem('physics', new ExamplePhysicsSystem())
-		this.addSystem('render', new ExampleRenderSystem(this.map))
-		this.addSystem('sound', new ExampleSoundSystem(this.map))
-		super.addSystems()
-	}
-}
+const sceneFactory = createSceneFactory()
 
-const game = new ExampleGameEngine('json/level3.json', new ExampleGameEntityFactory())
-game.run()
+;(async () => {
+	const game = Game.createGame()
+		.setScene('level-1', await sceneFactory.create('level-1'))
+		.changeScene('level-1')
+	
+	await game.load(Game.createAssetFetcher())
+	game.run()
+})()
+
+window.game = game

@@ -1,648 +1,1551 @@
 (function () {
 'use strict';
 
+// TODO: JSDoc
+
+class Collection extends Set {
+	map(func) {
+		const newSet = new Collection();
+		this.forEach(item => newSet.add(func(item)));
+		return newSet
+	}
+
+	filter(func) {
+		const newSet = new Collection();
+		this.forEach(item => { if (func(item)) newSet.add(item); });
+		return newSet
+	}
+
+	reject(func) {
+		return this.filter(item => !func(item))
+	}
+
+	reduce(func, defaultVal) {
+		if (defaultVal === undefined && this.size === 0)
+			throw new Error('reduce() cannot be called on an empty set')
+
+		const iterator = this.values();
+		let lastVal = defaultVal === undefined ? iterator.next().value : defaultVal;
+		for (const item of iterator) {
+			lastVal = func(lastVal, item);
+		}
+		return lastVal
+	}
+
+	some(func) {
+		for (const item of this) {
+			if (func(item)) return true
+		}
+		return false
+	}
+
+	every(func) {
+		for (const item of this) {
+			if (!func(item)) return false
+		}
+		return true
+	}
+
+	find(func) {
+		for (const item of this) {
+			if (func(item)) return item
+		}
+		return undefined
+	}
+
+	concat(iterable) {
+		const newSet = new Collection(this); // TODO: Change to make sure we can handle subclasses
+		for (const item of iterable) {
+			newSet.add(item);
+		}
+		return newSet
+	}
+}
+
+const _GameEvent = new WeakMap();
+let propagatingEvent = null; // Keeps track of the currently propagating event to cancel out duplicate events
+
 /**
- * AssetUser module.
- * @module AssetUser
+ * Class representing an event fired by a game object.
  */
+class GameEvent {
+	constructor(type, { bubbles } = {}) {
+		const _this = {
+			target: null,
+			currentTarget: null,
+			propagateImmediate: true,
+			propagate: !!bubbles,
+		};
+		_GameEvent.set(this, _this);
 
+		this.timestamp = null;
+		Object.defineProperty(this, 'type', { value: type, writable: false });
+		Object.defineProperty(this, 'bubbles', { value: !!bubbles, writable: false });
+		Object.defineProperty(this, 'target', { get() { return _this.target } });
+		Object.defineProperty(this, 'currentTarget', { get() { return _this.currentTarget } });
+	}
+
+	stopPropagation() {
+		_GameEvent.get(this).propagate = false;
+	}
+
+	stopImmediatePropagation() {
+		const _this = _GameEvent.get(this);
+		_this.propagate = false;
+		_this.propagateImmediate = false;
+	}
+}
+
+const _eventTargetMixin = new WeakMap();
 
 /**
- * Class that acts as an interface/abstract class for any class requiring assets. Please avoid instantiating directly.
- * @interface
- * */
-class AssetUser {
+ * Event Target mixin
+ *
+ * This provides properties and methods used for game event handling.
+ * It's not meant to be used directly.
+ *
+ * @mixin eventTargetMixin
+ */
+const eventTargetMixin = {
+	construct() {
+		_eventTargetMixin.set(this, {
+			listeners: new Map(),
+			listenerOptions: new WeakMap(),
+			parent: null,
+		});
+	},
 
-	/**
-	 * Create an AssetUser instance (fails unless overridden).
-	 */
+	// TODO: DRY this up
+	async dispatchEventAsync(e) {
+		// Prevent duplicate events during propagation
+		if (propagatingEvent && propagatingEvent.currentTarget === this) return
+
+		const _this = _eventTargetMixin.get(this);
+		const _event = _GameEvent.get(e);
+
+		// Modify event's private properties
+		if (_event.target === null) {
+			_event.timestamp = performance.now();
+			_event.target = this;
+		}
+		_event.currentTarget = this;
+
+		// Loop over listeners (break out when e.stopImmediatePropagation() is called)
+		const set = _this.listeners.get(e.type);
+		let promises = [];
+		if (set) {
+			for (const listener of set) {
+				const options = _this.listenerOptions.get(listener);
+				promises.push(listener.call(this, e));
+				if (options && options.once) this.removeEventListener(e.type, listener);
+				if (!_event.propagateImmediate) break
+			}
+		}
+
+		// If this event propagates, dispatch event on parent
+		if (_event.propagate && _this.parent) {
+			propagatingEvent = e;
+			promises.push(_this.parent.dispatchEventAsync(e));
+		} else {
+			propagatingEvent = null;
+		}
+		await Promise.all(promises);
+	},
+
+	dispatchEvent(e) {
+		// Prevent duplicate events during propagation
+		if (propagatingEvent && propagatingEvent.currentTarget === this) return
+
+		const _this = _eventTargetMixin.get(this);
+		const _event = _GameEvent.get(e);
+
+		// Modify event's private properties
+		if (_event.target === null) {
+			_event.timestamp = performance.now();
+			_event.target = this;
+		}
+		_event.currentTarget = this;
+
+		// Loop over listeners (break out when e.stopImmediatePropagation() is called)
+		const set = _this.listeners.get(e.type);
+		if (set) {
+			for (const listener of set) {
+				const options = _this.listenerOptions.get(listener);
+				listener.call(this, e);
+				if (options && options.once) this.removeEventListener(e.type, listener);
+				if (!_event.propagateImmediate) break
+			}
+		}
+
+		// If this event propagates, dispatch event on parent
+		if (_event.propagate && _this.parent) {
+			propagatingEvent = e;
+			_this.parent.dispatchEvent(e);
+		} else {
+			propagatingEvent = null;
+		}
+		return this
+	},
+
+	addEventListener(type, listener, options) {
+		const _this = _eventTargetMixin.get(this);
+		const set = _this.listeners.has(type) ? _this.listeners.get(type) : new Collection();
+		set.add(listener);
+
+		_this.listeners.set(type, set);
+		_this.listenerOptions.set(listener, options);
+		return this
+	},
+
+	removeEventListener(type, listener) {
+		const set = _eventTargetMixin.get(this).listeners.get(type);
+		if (!set) return
+		set.delete(listener);
+		return this
+	},
+
+	propagateEventsFrom(child) {
+		const _child = _eventTargetMixin.get(child);
+		if (_child) _child.parent = this;
+		return this
+	},
+
+	stopPropagatingFrom(child) {
+		const _child = _eventTargetMixin.get(child);
+		if (_child && _child.parent === this) _child.parent = null;
+		return this
+	}
+};
+
+// TODO: JSDoc
+
+const unindexItem = (map, item) => {
+	map.forEach((indexer, key) => {
+		map.get(key).delete(item);
+	});
+};
+
+const _Collection = new WeakMap();
+class IndexedCollection extends Collection {
 	constructor() {
-		if (this.constructor === AssetUser) {
-			throw new Error('Can\'t instantiate AssetUser! (abstract class)')
-		}
-		this.loaded = false;
-		this.processing = false;
-	}
-
-	/**
-	 * @returns {array}  Array of path strings or plain objects with a "path" and "reviver" function (for JSON).
-	 */
-	getAssetPaths() {
-		return []
-	}
-
-	/**
-	 * Event handler function - Store downloaded assets.
-	 * @param {Object} assets - Plain object that works as an associative array. Each item key is a path from "getAssetPaths()".
-	 */
-	onAssetsLoaded() {
-		this.loaded = true;
-		this.processing = false;
-	}
-}
-
-/**
- * EntityManager module.
- * @module EntityManager
- */
-
-/** Class representing a collection of entities and logic to run against that collection. */
-class EntityManager {
-
-	/**
-	 * Create an Entity Manager.
-	 * @param {EntityFactory} entityFactory - Instance of an EntityFactory. Used when calling addEntity() method.
-	 */
-	constructor(entityFactory) {
-		this.entityFactory = entityFactory;
-		this.entities = [];
-		this.entitySubsets = {};
-	}
-
-	/**
-	 * Get an array of Entity instances.
-	 * @param  {string=} subsetName - Name of entity subset.
-	 * @returns {Entity[]}  Entity instances for this game.
-	 */
-	getEntities(subsetName) {
-		if(!subsetName) { return this.entities }
-		return this.entitySubsets[subsetName].entities
-	}
-
-	/**
-	 * Create a subset of the Entity array for this game.
-	 * @param  {string} subsetName - Name of component used to get subset.
-	 * @param  {function} mapper - Function to help determine if an Entity should be a part of this subset.
-	 */
-	addEntitySubset(subsetName, mapper) {
-		this.entitySubsets[subsetName] = {
-			entities: this.entities.filter(mapper),
-			shouldContain: mapper
-		};
-	}
-
-	/**
-	 * Add an Entity.
-	 * @param  {string} entityType - Type of Entity to add to this game.
-	 * @param {Object} data - Plain object representing the component data.
-	 * @returns {Entity}  Entity that was added
-	 */
-	addEntity(entityType, data) {
-
-		let callback = (entity) => {
-			for(let subsetKey in this.entitySubsets) {
-				let subset = this.entitySubsets[subsetKey];
-				let idx = subset.entities.indexOf(entity);
-				if(idx === -1 && subset.shouldContain(entity)) {
-					subset.entities.push(entity);
-				} else if (idx !== -1 && !subset.shouldContain(entity)) {
-					subset.entities.splice(idx, 1);
-				}
-			}
-		};
-
-		let entityToAdd = this.entityFactory.create(
-			entityType,
-			data,
-			callback
-		);
-
-		this.entities.push(entityToAdd);
-
-		return this.entities[this.entities.length - 1]
-	}
-
-	/**
-	 * Remove an Entity.
-	 * @param {Entity}  entity - Entity instance to be removed
-	 */
-	removeEntity(entity) {
-		let handle = (list) => {
-			let idx = list.indexOf(entity);
-			if(idx !== -1) {
-				list.splice(idx, 1);
-			}
-		};
-
-		// Remove from subset arrays
-		for(let subsetKey in this.entitySubsets) {
-			let subset = this.entitySubsets[subsetKey];
-			handle(subset.entities);
-		}
-
-		// Remove from main set array
-		handle(this.entities);
-	}
-}
-
-/**
- * AssetManager module.
- * @module AssetManager
- */
-
-// Asset Loader/Manager (http://www.html5rocks.com/en/tutorials/games/assetmanager/)
-
-/** Class that represents a set of file retreival methods. */
-class AssetManager {
-
-	/**
-	 * Create an Asset Manager.
-	 */
-	constructor() {
-		this.cache = {};
-		this.init();
-	}
-
-	/**
-	 * Reset download queue (and error/success counts).
-	 */
-	init() {
-		this.downloadQueue = [];  // array of path strings or plain objects containing a "path" string and "reviver" function (for JSON)
-		this.successCount = 0;    // number of successful downloads (set when downloadAll() method is run)
-		this.errorCount = 0;      // number of failed downloads (set when downloadAll() method is run)
-	}
-
-	/**
-	 * Queue a file for download.
-	 * @param  {string|Object}  pathOrObj - File path/url at which the file may be found.
-	 * @param  {boolean=}  forceDownload - Setting this to true will add the file even if it is found in the cache.
-	 */
-	queueDownload(pathOrObj, forceDownload) {
-		let path = (typeof pathOrObj === 'object') ?
-			pathOrObj.path:
-			pathOrObj;
-
-		if(forceDownload || !this.cache[path])
-			this.downloadQueue.push(pathOrObj);
-	}
-
-	/**
-	 * Queue multiple files for download.
-	 * @param  {string[]}  paths - File paths/urls at which the files may be found.
-	 * @param  {boolean=}  forceDownload - Setting this to true will add the files even if it is found in the cache.
-	 */
-	queueDownloads(paths, forceDownload) {
-		for (let path of paths) {
-			this.queueDownload(path, forceDownload);
-		}
-	}
-
-	/**
-	 * Download all queued files.
-	 * @param  {function}  downloadCallback - function to be run once all files are downloaded.
-	 * @param  {function}  progCallback     - function to be run for each file downloaded.
-	 */
-	downloadAll(downloadCallback, progCallback) {
-		if (this.downloadQueue.length === 0) {
-			progCallback && progCallback(1.00);
-			downloadCallback();
-			return
-		}
-
-		let handleDownload = (path, obj, success) => {
-
-			if(success) {
-				this.successCount += 1;
-				//console.log(path + ' is loaded')
-			} else {
-				this.errorCount += 1;
-				//console.log('Error: Could not load ' + path)
-			}
-
-			if (this.isDone()) {
-				progCallback && progCallback(1.00);
-				this.init();
-				this.cache[path] = obj;
-				downloadCallback();
-			} else {
-				this.cache[path] = obj;
-				progCallback && progCallback((this.successCount + this.errorCount) / this.downloadQueue.length);
-			}
-		};
-
-		(() => {
-			for (let pathOrObj of this.downloadQueue) {
-				let path = (typeof pathOrObj === 'object') ?
-					pathOrObj.path:
-					pathOrObj;
-				let parts = path.split('.');
-				let ext = parts[parts.length - 1];
-				let asset;
-				let loadEventName = 'load';
-
-				switch (ext.toLowerCase()) {
-
-					// Images
-					case 'jpg':
-					case 'jpeg':
-					case 'gif':
-					case 'bmp':
-					case 'png':
-					case 'tif':
-					case 'tiff':
-						asset = new Image();
-						break
-
-					// Audio
-					case 'ogg':
-					case 'wav':
-					case 'mp3':
-						(function() {
-							let innerPathOrObj = pathOrObj; // This and the outer function were needed to keep the path
-							let innerPath = (typeof innerPathOrObj === 'object') ?
-								innerPathOrObj.path:
-								innerPathOrObj;
-							let httpRequest = new XMLHttpRequest();
-							httpRequest.open('GET', innerPath, true);
-							httpRequest.responseType = 'arraybuffer';
-
-							httpRequest.onreadystatechange = function () {
-								if (this.readyState === 4) {
-									if (this.status === 200) {
-										handleDownload(innerPath, this.response, true);
-									} else {
-										handleDownload(innerPath, null, false);
-									}
-								}
-							};
-
-							httpRequest.send();
-						})();
-						continue
-
-					// Video
-					case 'm3u8':
-					case 'webm':
-					case 'mp4':
-						asset = document.createElement('video');
-						loadEventName = 'canplaythrough';
-						break
-
-					// JSON
-					case 'json':
-						(function() {
-							let innerPathOrObj = pathOrObj; // This and the outer function were needed to keep the path
-							let innerPath = (typeof innerPathOrObj === 'object') ?
-								innerPathOrObj.path:
-								innerPathOrObj;
-							let httpRequest = new XMLHttpRequest();
-
-							httpRequest.onreadystatechange = function () {
-								if (this.readyState === 4) {
-									if (this.status === 200) {
-										let data = JSON.parse(this.responseText);
-										if(innerPathOrObj.reviver) { data = innerPathOrObj.reviver(data); }
-										handleDownload(innerPath, data, true);
-									} else {
-										handleDownload(innerPath, null, false);
-									}
-								}
-							};
-							httpRequest.open('GET', innerPath, true);
-							httpRequest.send();
-						})();
-						continue
-				}
-
-				asset.addEventListener(loadEventName, function() {
-					// Note: getting src this way allows us to use the actual value (vs fully-qualified path)
-					handleDownload(this.getAttribute('src'), this, true);
-				}, false);
-				asset.addEventListener('error', function() {
-					handleDownload(this.getAttribute('src'), this, false);
-				}, false);
-				asset.src = path;
-			}
-		})();
-	}
-
-
-	/**
-	 * Returns true if all files in the current download queue have been downloaded.
-	 * @returns {boolean} Returns true if done.
-	 */
-	isDone() {
-		return (this.downloadQueue.length === this.successCount + this.errorCount)
-	}
-
-	/**
-	 * Gets the previously downloaded file from this AssetManager instance's cache.
-	 * @param {string} path - The path to the previously downloaded asset.
-	 * @returns {*}  Returns an object representing the previously downloaded asset.
-	 */
-	getAsset(path) {
-		return this.cache[path]
-	}
-
-}
-
-/**
- * Utilities module.
- * @module utilities
- */
-
-/** Class that represents a set of shared convenience methods. */
-class Utilities {
-
-	/**
-	 * Creates an associative array (an Object that may be used in a for...of).
-	 * @param  {Object=} obj - Plain-data Object.
-	 * @returns {Object}  An iterable object for use in for...of loops.
-	 */
-	static createIterableObject(obj) {
-		obj = obj || {};
-		obj[Symbol.iterator] = Array.prototype[Symbol.iterator];
-		return obj
-	}
-
-	/**
-	 * Creates an array of the given dimensions.
-	 * @param  {...number} [length=0] - Array dimensions.
-	 * @returns {Array}  An array that includes the number of dimensions given at the given lengths.
-	 */
-	static createArray(length) {
-		let arr, i;
-
-		arr = new Array(length || 0);
-		i = length;
-
-		if (arguments.length > 1) {
-			let args = Array.prototype.slice.call(arguments, 1);
-			while(i--) arr[length-1 - i] = this.createArray.apply(this, args);
-		}
-
-		return arr
-	}
-}
-
-/**
- * TiledMap module.
- * @module TiledMap
- */
-
-/** Class representing a Map built from Tiled data. */
-class TiledMap extends AssetUser {
-	constructor(data) {
 		super();
-		this.data = data;
-		this.assets = {};
-
-		this.tileWidth = data.tilewidth || 0;
-		this.tileHeight = data.tileheight || 0;
-		this.tiles = [];
-		this.layers = {};
-		this.objects = [];
-		this.layerCanvases = {};
-		this.bgmLoopTarget = (data.properties && data.properties.bgmLoopTarget) || 0;
+		_Collection.set(this, {
+			indexed: new Map(),
+			indexers: new Map(),
+		});
 	}
 
-	/**
-	 * @returns {array}  Array of path strings or plain objects with a "path" and "reviver" function (for JSON)
-	 */
-	getAssetPaths() {
-		let paths = [];
+	// subset filter
+	setIndex(indexName, indexer) {
+		const _this = _Collection.get(this);
 
-		if(this.data.properties && this.data.properties.bgm) {
-			paths.push(this.data.properties.bgm);
-		}
+		if (_this.indexers.has(indexName)) return
 
-		this.data.tilesets.forEach(function(tileset) {
-			paths.push(tileset.image);
+		_this.indexers.set(indexName, indexer);
+
+		const indexedSet = new Collection();
+		this.forEach((item) => {
+			const val = indexer(item);
+			if (val !== undefined) indexedSet.add(val);
 		});
 
-		return paths
+		_this.indexed.set(indexName, indexedSet);
+
+		return this
+	}
+
+	// get subset
+	getIndexed(indexName) {
+		return _Collection.get(this).indexed.get(indexName)
+	}
+
+	// Can be called from observing logic (like a Proxy)
+	// or events (like if a component property changes)
+	reindexItem(item) {
+		const _this = _Collection.get(this);
+		unindexItem(_this.indexed, item); // in case item was already added
+		_this.indexers.forEach((indexer, key) => {
+			const val = indexer(item);
+			if (val !== undefined) _this.indexed.get(key).add(val);
+		});
+		return this
+	}
+
+	add(item) {
+		const returnVal = super.add(item);
+		this.reindexItem(item);
+		return returnVal
+	}
+
+	delete(item) {
+		const _this = _Collection.get(this);
+		unindexItem(_this.indexed, item);
+		return super.delete(item)
+	}
+}
+
+// TODO: JS Doc
+
+const _Factory = new WeakMap();
+
+class Factory {
+	constructor() {
+		_Factory.set(this, {
+			middleware: new Set(),
+			constructors: new Map(),
+		});
+	}
+
+	use(middlewareFunc) {
+		_Factory.get(this).middleware.add(middlewareFunc);
+		return this
+	}
+
+	set(constructName, construct) {
+		const constructNames = Array.isArray(constructName) ? constructName : [ constructName ];
+		constructNames.forEach((constructName) => {
+			_Factory.get(this).constructors.set(constructName, construct);
+		});
+		return this
+	}
+
+	has(constructName) {
+		return _Factory.get(this).constructors.has(constructName)
+	}
+
+	create(constructName, data) {
+		const _this = _Factory.get(this);
+		const construct = _this.constructors.get(constructName);
+		if (!construct) {
+			console.warn(`${constructName} constructor doesn't exist`);
+			return
+		}
+		const middleware = [..._this.middleware];
+		data = middleware.reduce((inData, func) => func(constructName, inData), data);
+		return construct(constructName, data)
+	}
+}
+
+// TODO: JS Doc
+
+const _AsyncFactory = new WeakMap();
+
+class AsyncFactory {
+	constructor() {
+		_AsyncFactory.set(this, {
+			middleware: new Set(),
+			constructors: new Map(),
+		});
+	}
+
+	use(middlewareFunc) {
+		_AsyncFactory.get(this).middleware.add(middlewareFunc);
+		return this
+	}
+
+	set(constructName, construct) {
+		const constructNames = Array.isArray(constructName) ? constructName : [ constructName ];
+		constructNames.forEach((constructName) => {
+			_AsyncFactory.get(this).constructors.set(constructName, construct);
+		});
+		return this
+	}
+
+	async create(constructName, data) {
+		const _this = _AsyncFactory.get(this);
+		const construct = _this.constructors.get(constructName);
+		const middleware = [..._this.middleware];
+
+		for (const middlewareFunc of middleware) {
+			data = await middlewareFunc(constructName, data);
+		}
+
+		return await construct(constructName, data)
+	}
+}
+
+const ADD_PROPS_METHOD_NAME = 'construct';
+
+// Creates a function that "extracts" an object with only the properties that test true
+const createExtractObjFunc = test => obj => {
+	const extractedObj = {};
+	Object.entries(obj).forEach(([key, val]) => {
+		if (test(val, key)) extractedObj[key] = val;
+	});
+	return extractedObj
+};
+
+// Extracts an object with only the non-function properties
+const extractConstructor = createExtractObjFunc((val, key) => key === ADD_PROPS_METHOD_NAME);
+
+// Extracts an object with only the function properties (methods)
+const extractMethods = createExtractObjFunc((val, key) => key !== ADD_PROPS_METHOD_NAME);
+
+// Creates an extendable class that includes the provided mixins
+const createMixinFunc = (Clazz) => (...mixins) => {
+	const constructors = mixins.map(mixin => extractConstructor(mixin).construct);
+	const methodsMixins = mixins.map(mixin => extractMethods(mixin));
+
+	// Add properties to class constructor
+	let Mixable;
+	if (Clazz)
+		Mixable = class extends Clazz {
+			constructor(...args) {
+				super(...args);
+				constructors.forEach(construct => construct.call(this));
+			}
+		};
+	else
+		Mixable = class {
+			constructor() {
+				constructors.forEach(construct => construct.call(this));
+			}
+		};
+
+	// Add methods to class prototype
+	Object.assign(Mixable.prototype, ...methodsMixins);
+
+	return Mixable
+};
+
+const MixedWith = createMixinFunc();
+
+// Creates nested empty arrays
+const createArray = (...args) => {
+	if (args.length === 0) return []
+
+	const length = args[0];
+
+	const arr = new Array(length);
+
+	let i = length;
+	if (args.length > 1) {
+		while(i--) arr[length-1 - i] = createArray(...(args.slice(1)));
+	}
+
+	return arr
+};
+
+class ObservableChangeEvent extends GameEvent {
+	constructor(type, { prop, args } = {}) {
+		super(type);
+		Object.defineProperty(this, 'prop', { value: prop, writable: false });
+		Object.defineProperty(this, 'args', { value: args, writable: false });
+	}
+}
+
+const handledObjs = new WeakMap();
+
+var observableMixin = Object.assign({}, eventTargetMixin, {
+	construct() {
+		eventTargetMixin.construct.call(this);
+	},
+
+	makeObservable(prop) {
+		if (!handledObjs.has(this))
+			handledObjs.set(this, new Set());
+		const handledProps = handledObjs.get(this);
+
+		if (handledProps.has(prop)) return
+
+		let val = this[prop];
+		const descriptor = Reflect.getOwnPropertyDescriptor(this, prop);
+
+		// Observe method calls
+		if (typeof val === 'function') {
+			Reflect.defineProperty(this, prop, Object.assign({
+				get() {
+					return (...args) => {
+						this.dispatchEvent(new ObservableChangeEvent('observableChange', { prop, args }));
+						return val.call(this, ...args)
+					}
+				},
+				set(inVal) { val = inVal; }
+			}, descriptor));
+
+		// Observe property changes
+		} else {
+			Reflect.defineProperty(this, prop, Object.assign({
+				get() { return val },
+				set(inVal) {
+					this.dispatchEvent(new ObservableChangeEvent('observableChange', { prop, args: [ inVal ] }));
+					val = inVal;
+				}
+			}, descriptor));
+		}
+		return this
+	},
+});
+
+const _Entity = new WeakMap(); // Store private variables here
+
+/** Class that represents an Entity (the "E" in the ECS design pattern). */
+class Entity extends MixedWith(observableMixin) {
+
+	/**
+	 * Create an Entity.
+	 */
+	constructor() {
+		super();
+		_Entity.set(this, {
+			components: new Map()
+		});
+		this.makeObservable('setComponent');
+		this.makeObservable('removeComponent');
 	}
 
 	/**
-	 * Event handler function - Store downloaded assets
-	 * @param {Object} assets - Plain object that works as an associative array. Each item key is a path from "getAssetPaths()"
+	 * Sets a component object for this Entity under the given name.
+	 * @param  {string} compName - Name of component.
+	 * @param  {Object=} component - Plain-data Object.
+	 * @returns {this} - Returns self for method chaining.
 	 */
-	onAssetsLoaded(assets) {
-		this.assets = assets;
+	setComponent(compName, component) {
+		component.setParentEntity(this);
+		_Entity.get(this).components.set(compName, component);
+		return this
+	}
 
-		this.bgm = this.data.properties && assets[this.data.properties.bgm];
+	/**
+	 * Removes a component object from this Entity under the given name (if it exists).
+	 * @param  {string} compName - Name of component.
+	 * @returns {this} - Returns self for method chaining.
+	 */
+	removeComponent(compName) {
+		_Entity.get(this).components.delete(compName);
+		return this
+	}
 
-		// Populate this.tiles array
-		this.populateTiles(this.data.tilesets);
+	/**
+	 * Gets the component object for this Entity under the given name.
+	 * @param  {string} compName - Name of component.
+	 * @returns {Object|null}  Returns the component object under the given name.
+	 */
+	getComponent(compName) {
+		return _Entity.get(this).components.get(compName)
+	}
 
-		// Split up each layer's data into x and y coordinate multidimensional array
-		this.populateLayers(this.data.layers);
+	/**
+	 * Check if the given component exists for this Entity.
+	 * @param  {string} compName - Name of component.
+	 * @returns {boolean}  true if the given component exists for this Entity.
+	 */
+	hasComponent(compName) {
+		return _Entity.get(this).components.has(compName)
+	}
+}
 
-		// Draw the non-animated parts of each map layer on stored canvases (speeds up rendering at runtime)
-		this.populateLayerCanvases();
+const getAllObjKeys = (obj) => [... new Set(obj ? Object.keys(obj).concat(
+	getAllObjKeys(Object.getPrototypeOf(obj))
+) : [])];
 
-		super.onAssetsLoaded();
+const _Component = new WeakMap(); // Store private variables here
+const _ProtoChainKeys = new WeakMap(); // Cache object keys from prototype chains
+
+/** Class that represents an Component (the "C" in the ECS design pattern). */
+class Component extends MixedWith(observableMixin) {
+
+	/**
+	 * Create a Component.
+	 * @param {Object} [obj] - Object with properties to assign to this Component
+	 */
+	constructor(obj) {
+		super();
+		if (obj) this.decorate(obj);
+		_Component.set(this, {
+			parentEntity: null
+		});
+	}
+
+	/**
+	 * Decorates an existing object with Component functionality.
+	 * @param {Object} [obj] - Object with properties to assign to this Component
+	 * @returns {this} - Returns self for method chaining.
+	 */
+	decorate(obj = {}) {
+		const objProto = Reflect.getPrototypeOf(obj);
+
+		let objKeys;
+		if (objProto !== Object.prototype) {
+			if (!_ProtoChainKeys.has(objProto))
+				_ProtoChainKeys.set(objProto, getAllObjKeys(obj));
+			objKeys = _ProtoChainKeys.get(objProto);
+		} else {
+			objKeys = getAllObjKeys(obj);
+		}
+
+		objKeys.forEach((key) => {
+			Reflect.defineProperty(this, key, {
+				enumerable: true,
+				get() { return obj[key] },
+				set(val) { obj[key] = val; },
+			});
+		});
+
+		return this
+	}
+
+	/**
+	 * Gets the Entity to which this Component belongs
+	 * @param {Entity} parentEntity - The Entity to which this Component belongs.
+	 * @returns {this} - Returns self for method chaining.
+	 */
+	setParentEntity(parentEntity = null) {
+		_Component.get(this).parentEntity = parentEntity;
+		return this
+	}
+
+	/**
+	 * Gets the Entity to which this Component belongs.
+	 * @returns {Entity} - Returns the parent Entity.
+	 */
+	getParentEntity() {
+		return _Component.get(this).parentEntity
+	}
+}
+
+class GameStopEvent extends GameEvent {
+	constructor(type) {
+		super(type, { bubbles: true });
+	}
+}
+
+class GameSceneChangeEvent extends GameEvent {
+	constructor(type, { sceneName } = {}) {
+		super(type, { bubbles: true });
+		Object.defineProperty(this, 'sceneName', { value: sceneName, writable: false });
+	}
+}
+
+class SystemMountedEvent extends GameEvent {
+	constructor(type, { entities } = {}) {
+		super(type);
+		Object.defineProperty(this, 'entities', { value: entities, writable: false });
+	}
+}
+
+class SystemUpdateEvent extends GameEvent {
+	constructor(type, { entities, deltaTime, timestamp } = {}) {
+		super(type);
+		Object.defineProperty(this, 'entities', { value: entities, writable: false });
+		Object.defineProperty(this, 'timestamp', { value: timestamp, writable: false });
+		Object.defineProperty(this, 'deltaTime', { value: deltaTime, writable: false });
+	}
+}
+
+class SystemLoadEvent extends GameEvent {
+	constructor(type, { assetFetcher } = {}) {
+		super(type);
+		Object.defineProperty(this, 'assetFetcher', { value: assetFetcher, writable: false });
+	}
+}
+
+class SystemLoadedEvent extends GameEvent {
+	constructor(type, { assets } = {}) {
+		super(type);
+		Object.defineProperty(this, 'assets', { value: assets, writable: false });
+	}
+}
+
+// Creates a function that throws an error when run
+const unimplemented = name => () => {
+	throw new Error(`${name} not set`)
+};
+
+/**
+ * Class representing a System.
+ * @mixes eventTargetMixin
+ */
+const _System = new WeakMap();
+class System extends MixedWith(eventTargetMixin) {
+	constructor() {
+		super();
+		_System.set(this, {
+			getEntitiesFunc: unimplemented('getEntitiesFunc'),
+			addEntityFunc: unimplemented('addEntitiesFunc'),
+		});
+	}
+
+	setGetEntitiesFunc(func) {
+		_System.get(this).getEntitiesFunc = func;
+		return this
+	}
+
+	unsetGetEntitiesFunc() {
+		_System.get(this).getEntitiesFunc = unimplemented('getEntitiesFunc');
+		return this
+	}
+
+	getEntities(indexName) {
+		return _System.get(this).getEntitiesFunc(indexName)
+	}
+
+	setAddEntityFunc(func) {
+		_System.get(this).addEntityFunc = func;
+		return this
+	}
+
+	unsetAddEntityFunc() {
+		_System.get(this).addEntityFunc = unimplemented('addEntityFunc');
+		return this
+	}
+
+	addEntity(entity) {
+		_System.get(this).addEntityFunc(entity);
+		return this
+	}
+
+	/**
+	 * Fires a bubbling "stopGame" event.
+	 *
+	 * @returns {this} - Returns self for method chaining.
+	 */
+	stopGame() {
+		this.dispatchEvent(new GameStopEvent('stopGame'));
+		return this
+	}
+
+	/**
+	 * Fires a bubbling "changeScene" event.
+	 *
+	 * @param {string} sceneName - Name of the scene to activate
+	 * @returns {this} - Returns self for method chaining.
+	 */
+	changeScene(sceneName) {
+		this.dispatchEvent(new GameSceneChangeEvent('changeScene', { sceneName }));
+		return this
+	}
+
+	/**
+	 * Fires a "load" event.
+	 *
+	 * @async
+	 * @param {AssetFetcher} assetFetcher - AssetFetcher to be used in handlers.
+	 * @returns {Promise} - Promise that resolves once the load event handler(s) resolve.
+	 */
+	load(assetFetcher) {
+		return this.dispatchEventAsync(new SystemLoadEvent('load', { assetFetcher }))
+	}
+
+	/**
+	 * Fires a "loaded" event.
+	 *
+	 * @param {Map} assets - Assets for the system to use.
+	  @returns {Promise} - Promise that resolves once the loaded event handler(s) resolve.
+	 */
+	loaded(assets) {
+		return this.dispatchEventAsync(new SystemLoadedEvent('loaded', { assets }))
+	}
+
+	/**
+	 * Fires a "mounted" event.
+	 *
+	 * @param {Collection<Entity>} entities - Entities to attach to the event.
+	 * @returns {this} - Returns self for method chaining.
+	 */
+	mounted(entities) {
+		this.dispatchEvent(new SystemMountedEvent('mounted', { entities }));
+		return this
+	}
+
+	/**
+	 * Fires an "update" event.
+	 *
+	 * @param {Collection<Entity>} entities - Entities to attach to the event.
+	 * @param {DOMHighResTimeStamp} deltaTime -
+	 *     Time since last update in milliseconds to attach to the event.
+	 * @param {DOMHighResTimeStamp} timestamp -
+	 *     Current time in milliseconds to attach to the event.
+	 * @returns {this} - Returns self for method chaining.
+	 */
+	update(entities, deltaTime, timestamp) {
+		this.dispatchEvent(new SystemUpdateEvent('update', { entities, deltaTime, timestamp }));
+		return this
+	}
+}
+
+class SceneLoadEvent extends GameEvent {
+	constructor(type, { assetFetcher } = {}) {
+		super(type, { bubbles: true });
+		Object.defineProperty(this, 'assetFetcher', { value: assetFetcher, writable: false });
+	}
+}
+
+class SceneLoadedEvent extends GameEvent {
+	constructor(type, { assets } = {}) {
+		super(type, { bubbles: true });
+		Object.defineProperty(this, 'assets', { value: assets, writable: false });
+	}
+}
+
+class SceneUpdateEvent extends GameEvent {
+	constructor(type, { entities, deltaTime } = {}) {
+		super(type, { bubbles: true });
+		Object.defineProperty(this, 'entities', { value: entities, writable: false });
+		Object.defineProperty(this, 'timestamp', { value: deltaTime, writable: false });
+	}
+}
+
+const _Scene = new WeakMap();
+
+const MAX_UPDATE_RATE = 60 / 1000;
+
+/**
+ * Class representing a Scene.
+ * @mixes eventTargetMixin
+ */
+class Scene extends MixedWith(eventTargetMixin) {
+
+	/**
+	 * Create a Scene.
+	 */
+	constructor() {
+		super();
+		_Scene.set(this, {
+			systems: new Map(),
+			entities: new IndexedCollection(),
+			lastUpdate: null,
+		});
+	}
+
+	// --------------------------- Entity Management ----------------------------
+
+	/**
+	 * Add an entity.
+	 *
+	 * @param {Entity} entity - Entity to be added.
+	 * @returns {this} - Returns self for method chaining.
+	 */
+	addEntity(entity) {
+		if (entity) _Scene.get(this).entities.add(entity);
+		return this
+	}
+
+	/**
+	 * Add entities.
+	 *
+	 * @param {Entity[]} entities - Iterable containing Entities to be added.
+	 * @returns {this} - Returns self for method chaining.
+	 */
+	addEntities(entities) {
+		const innerEntities = _Scene.get(this).entities;
+		entities.forEach(entity => innerEntities.add(entity));
+		return this
+	}
+
+	/**
+	 * Remove an entity.
+	 *
+	 * @param {Entity} entity - Entity to be removed.
+	 * @returns {this} - Returns self for method chaining.
+	 */
+	removeEntity(entity) {
+		_Scene.get(this).entities.delete(entity);
+		return this
+	}
+
+	/**
+	 * Checks if an entity was added.
+	 *
+	 * @param {Entity} entity - Entity to find.
+	 * @returns {boolean} - Returns true if the entity was found, false otherwise.
+	 */
+	hasEntity(entity) {
+		return _Scene.get(this).entities.has(entity)
+	}
+
+	/**
+	 * Checks if the given entity belongs under the associated index.
+	 *
+	 * @callback Scene~indexer
+	 * @param {Entity} - entity to check
+	 * @returns {boolean} - True if this entity belongs under the current index.
+	 *     False, otherwise
+	 */
+
+	/**
+	 * Adds an indexer under the given name. When entities are added, they will
+	 * be tested against each indexer. Indexed entities can be accessed via
+	 * getEntities(indexName).
+	 *
+	 * @param {string} indexName - Name of the index to add.
+	 * @param {Scene~indexer} indexer - Callback function to determine if an entity
+	 *     belongs under this index/subset.
+	 * @returns {this} - Returns self for method chaining.
+	 */
+	setEntityIndexer(indexName, indexer) {
+		_Scene.get(this).entities.setIndex(indexName, indexer);
+		return this
+	}
+
+	/**
+	 * Re-runs each indexer on the given entity. Primarily useful if values used
+	 * in the indexer calculations will change after the entity is added. One
+	 * possible use case would be in a setter.
+	 *
+	 * @param {Entity} entity - Entity to be removed.
+	 * @returns {this} - Returns self for method chaining.
+	 */
+	reindexEntity(entity) {
+		_Scene.get(this).entities.reindexItem(entity);
+		return this
+	}
+
+	/**
+	 * Gets the entities under the given index name. If no index name is provided,
+	 * this method will return all added entities.
+	 *
+	 * @param {string} indexName - Name of the index.
+	 * @returns {Set<Entity>|Collection<Entity>} - Set object containing the entities.
+	 */
+	getEntities(indexName) {
+		if (indexName === undefined) return _Scene.get(this).entities
+		return _Scene.get(this).entities.getIndexed(indexName)
+	}
+
+
+	// --------------------------- System Management ----------------------------
+
+	/**
+	 * Adds a system. NOTE: Systems are updated in the order they are added.
+	 *
+	 * @param {string} systemName - Name of the system to add.
+	 * @param {System} system - System to add.
+	 * @returns {this} - Returns self for method chaining.
+	 */
+	setSystem(systemName, system) {
+		const _this = _Scene.get(this);
+		this.propagateEventsFrom(system);
+		system.setGetEntitiesFunc(indexName => this.getEntities(indexName));
+		system.setAddEntityFunc(entity => this.addEntity(entity));
+		system.mounted(_this.entities);
+		_this.systems.set(systemName, system);
+		return this
+	}
+
+	/**
+	 * Removes a system.
+	 *
+	 * @param {string} systemName - Name of the system to remove.
+	 * @returns {this} - Returns self for method chaining.
+	 */
+	removeSystem(systemName) {
+		const _this = _Scene.get(this);
+		const system = _this.systems.get(systemName);
+		this.stopPropagatingFrom(system);
+		system.unsetGetEntitiesFunc();
+		system.unsetAddEntityFunc();
+		_this.systems.delete(systemName);
+		return this
+	}
+
+	/**
+	 * Removes a system.
+	 *
+	 * @param {string} systemName - Name of the system to get.
+	 * @returns {System|undefined} - Returns self for method chaining.
+	 */
+	getSystem(systemName) {
+		return _Scene.get(this).systems.get(systemName)
+	}
+
+	/**
+	 * Checks if a system was added.
+	 *
+	 * @param {string} systemName - Name of the system to find.
+	 * @returns {boolean} - Returns true if the system was found, false otherwise.
+	 */
+	hasSystem(systemName) {
+		return _Scene.get(this).systems.has(systemName)
+	}
+
+
+	// --------------------------------------------------------------------------
+
+	/**
+	 * Fires a bubbling "stopGame" event.
+	 *
+	 * @returns {this} - Returns self for method chaining.
+	 */
+	stopGame() {
+		this.dispatchEvent(new GameStopEvent('stopGame'));
+		return this
+	}
+
+	/**
+	 * Fires a bubbling "changeScene" event.
+	 *
+	 * @param {string} sceneName - Name of the scene to activate
+	 * @returns {this} - Returns self for method chaining.
+	 */
+	changeScene(sceneName) {
+		this.dispatchEvent(new GameSceneChangeEvent('changeScene', { sceneName }));
+		return this
+	}
+
+	/**
+	 * Passes assetFetcher to all systems to load.
+	 *
+	 * @async
+	 * @param {AssetFetcher} assetFetcher - AssetFetcher to be used in handlers.
+	 * @returns {Promise} - Promise that resolves once the load/loaded event handler(s) resolve.
+	 */
+	async load(assetFetcher) {
+		const systems = _Scene.get(this).systems;
+
+		// Fire load event for the scene
+		await this.dispatchEventAsync(new SceneLoadEvent('load', { assetFetcher }));
+
+		// Fire load events for each system
+		systems.forEach(system => system.load(assetFetcher));
+
+		// TODO: Add a "loading" event to be handled like the update event
+
+		// Fetch all assets and pass them back to the systems' loaded method
+		const assets = new Map(await assetFetcher.fetchAssets());
+
+		// TODO: Replace this with a keyed collection (Map version of Collection instead of Set)
+		const promises = [
+			this.dispatchEventAsync(new SceneLoadedEvent('loaded', { assets }))
+		];
+		systems.forEach(system => promises.push(system.loaded(assets)));
+
+		return Promise.all(promises)
+	}
+
+	/**
+	 * Calls update() on all systems then fires an "update" event.
+	 *
+	 * @param {DOMHighResTimeStamp} timestamp - Current time in milliseconds.
+	 * @returns {this} - Returns self for method chaining.
+	 */
+	update(timestamp) {
+		const _this = _Scene.get(this);
+		const entities = _this.entities;
+
+		if (_this.lastUpdate === null) _this.lastUpdate = timestamp;
+
+		const deltaTime = timestamp - _this.lastUpdate;
+
+		if (deltaTime === 0 || deltaTime >= MAX_UPDATE_RATE) {
+			_this.systems.forEach(system => system.update(entities, deltaTime, timestamp));
+			this.dispatchEvent(new SceneUpdateEvent('update', { entities, deltaTime, timestamp }));
+			_this.lastUpdate = timestamp;
+		}
+
+		return this
+	}
+}
+
+const _Game = new WeakMap();
+
+/**
+ * Class representing a Game.
+ * @mixes eventTargetMixin
+ */
+class Game extends MixedWith(eventTargetMixin) {
+
+	/**
+	 * Create a Game Engine.
+	 */
+	constructor() {
+		super();
+		const _this = {
+			activeScene: null,
+			scenes: new Map(),
+			running: false,
+			bubbledEvent: false,
+			stopGameEventListener: () => this.stopGame(),
+			changeSceneEventListener: event => this.changeScene(event.sceneName),
+		};
+		_Game.set(this, _this);
+
+		Object.defineProperty(this, 'running', { get() { return _this.running } });
+
+		// Handle events that bubble up to this class
+		this.addEventListener('changeScene', _this.changeSceneEventListener);
+		this.addEventListener('stopGame', _this.stopGameEventListener);
+	}
+
+	// ---------------------------- Scene Management ----------------------------
+
+	/**
+	 * Add a scene.
+	 *
+	 * @param {string} sceneName - Name used to uniquely identify the added scene.
+	 * @param {Scene} scene - Scene to add.
+	 * @returns {this} - Returns self for method chaining.
+	 */
+	setScene(sceneName, scene) {
+		const _this = _Game.get(this);
+		this.propagateEventsFrom(scene);
+		_this.scenes.set(sceneName, scene);
+		return this
+	}
+
+	/**
+	 * Remove a scene.
+	 *
+	 * @param {string} sceneName - Name used to uniquely identify the scene to remove.
+	 * @returns {this} - Returns self for method chaining.
+	 */
+	removeScene(sceneName) {
+		_Game.get(this).scenes.delete(sceneName);
+		return this
+	}
+
+	/**
+	 * Checks if a scene was added under the given name.
+	 *
+	 * @param {string} sceneName - Name used to uniquely identify the scene to find.
+	 * @returns {boolean} - Returns true if a scene was found, false otherwise.
+	 */
+	hasScene(sceneName) {
+		return _Game.get(this).scenes.has(sceneName)
+	}
+
+	/**
+	 * Finds and returns a scene using the given name.
+	 *
+	 * @param {string} sceneName - Name used to uniquely identify the scene to find.
+	 * @returns {Scene|undefined} - Scene found with the given name, if any.
+	 */
+	getScene(sceneName) {
+		if (!sceneName) return _Game.get(this).activeScene
+		return _Game.get(this).scenes.get(sceneName)
+	}
+
+	/**
+	 * Changes the active scene using the given name. Fires a "changeScene" event.
+	 *
+	 * @param {string} sceneName - Name used to uniquely identify the scene to find.
+	 * @returns {this} - Returns self for method chaining.
+	 *
+	 * @throws - Will throw an error if a scene is not found with the given name.
+	 */
+	changeScene(sceneName) {
+		const _this = _Game.get(this);
+		if (!_this.scenes.has(sceneName))
+			throw new Error(`Scene "${sceneName}" doesn't exist`)
+		_this.activeScene = _this.scenes.get(sceneName);
+
+		// Fires changeScene event
+		this.removeEventListener('changeScene', _this.changeSceneEventListener);
+		this.dispatchEvent(new GameSceneChangeEvent('changeScene', { sceneName }));
+		this.addEventListener('changeScene', _this.changeSceneEventListener);
+
+		return this
+	}
+
+
+	// --------------------------------------------------------------------------
+
+	/**
+	 * Passes assetFetcher to active scene and starts loading process.
+	 *
+	 * @async
+	 * @param {AssetFetcher} assetFetcher - AssetFetcher to be used in handlers.
+	 * @returns {Promise} - Promise that resolves once the load event handler(s) resolve.
+	 */
+	async load(assetFetcher) {
+		const scene = _Game.get(this).activeScene;
+		return await scene.load(assetFetcher)
+	}
+
+	/**
+	 * Stops the main game loop. Fires a "stopGame" event.
+	 *
+	 * @returns {this} - Returns self for method chaining.
+	 */
+	stopGame() {
+		const _this = _Game.get(this);
+		_this.running = false;
+		this.removeEventListener('stopGame', _this.stopGameEventListener);
+		this.dispatchEvent(new GameStopEvent('stopGame'));
+		this.removeEventListener('stopGame', _this.stopGameEventListener);
+		return this
+	}
+
+	/**
+	 * Starts the main game loop
+	 *
+	 * @param {string=} sceneName - Name used to uniquely identify the scene to find.
+	 * @returns {this} - Returns self for method chaining.
+	 *
+	 * @throws - Will throw an error if a scene is not found with the given name or,
+	 *     if no sceneName is provided and there is no active scene.
+	 */
+	run(sceneName) {
+		const _this = _Game.get(this);
+		_this.running = true;
+
+		if (sceneName) this.changeScene(sceneName);
+		else if (!_this.activeScene)
+			throw new Error('Active scene not set. Use changeScene() method or provide a sceneName to run()')
+
+		const main = (timestamp) => {
+			if (!_this.running) return
+			_this.activeScene.update(timestamp);
+			requestAnimationFrame(main);
+		};
+
+		main(performance.now());
+		return this
+	}
+}
+
+class FetchProgressEvent extends GameEvent {
+	constructor(type, { progress } = {}) {
+		super(type, { bubbles: true });
+		Object.defineProperty(this, 'progress', { value: progress, writable: false });
+	}
+}
+
+const IMAGE_EXTENSIONS = Object.freeze(['jpg', 'jpeg', 'gif', 'bmp', 'png', 'tif', 'tiff']);
+const AUDIO_EXTENSIONS = Object.freeze(['ogg', 'wav', 'mp3']);
+const VIDEO_EXTENSIONS = Object.freeze(['m3u8', 'webm', 'mp4']);
+
+const rejectIfNotOK = response => {
+	if(!response.ok) throw new Error('Response not OK')
+	return response
+};
+const fetchOK = (...args) => fetch(...args).then(rejectIfNotOK);
+const resolveObj = response => response.json();
+const resolveBlob = response => response.blob();
+const createBlobResolveFunc = (tagName) => (response) => resolveBlob(response)
+	.then((blob) => new Promise((resolve) => {
+		const objUrl = URL.createObjectURL(blob);
+		const obj = document.createElement(tagName);
+		obj.src = objUrl;
+		setTimeout(() => URL.revokeObjectURL(objUrl), 1000);
+		resolve(obj);
+	}));
+const resolveImage = createBlobResolveFunc('img');
+const resolveAudio = response => response.arrayBuffer();
+const resolveVideo = createBlobResolveFunc('video');
+const resolveText = response => response.text();
+
+// fetchAsset() - fetches and converts the response into the appropriate type of object
+var fetchAsset = (path, callback) => {
+	const parts = path.split('.');
+	const ext = parts.length !== 0 ? parts[parts.length - 1].toLowerCase() : 'json';
+
+	// Select resolver
+	let resolve;
+	if (ext === 'json') resolve = resolveObj;
+	else if (IMAGE_EXTENSIONS.includes(ext)) resolve = resolveImage;
+	else if (AUDIO_EXTENSIONS.includes(ext)) resolve = resolveAudio;
+	else if (VIDEO_EXTENSIONS.includes(ext)) resolve = resolveVideo;
+	else resolve = resolveText;
+
+	if (callback) {
+		const wrappedCallback = val => {
+			callback(val);
+			return val
+		};
+		return fetchOK(path).then(resolve).then(wrappedCallback).catch(wrappedCallback)
+	}
+
+	return fetchOK(path).then(resolve)
+};
+
+const _AssetFetcher = new WeakMap();
+
+/** A class used to fetch assets */
+class AssetFetcher extends MixedWith(eventTargetMixin) {
+	constructor() {
+		super();
+		_AssetFetcher.set(this, {
+			queuedAssetPaths: new Set()
+		});
+	}
+
+	/**
+	 * Queue an asset to be fetched.
+	 *
+	 * @param {string} path - File path/url at which the file may be found.
+	 * @returns {this} - Returns self for method chaining.
+	 */
+	queueAsset(path) {
+		if (path) _AssetFetcher.get(this).queuedAssetPaths.add(path);
+		return this
+	}
+
+	/**
+	 * Queue assets to be fetched.
+	 *
+	 * @param {string[]} [paths = []] - File path/url array at which the files may be found.
+	 * @returns {this} - Returns self for method chaining.
+	 */
+	queueAssets(paths = []) {
+		paths.forEach(path => this.queueAsset(path));
+		return this
+	}
+
+	/**
+	 * Fetch all queued assets. On each asset fetch, a "fetchProgress" event
+	 * will be fired with the current percent complete. (Ex. 0.5 for 50%)
+	 *
+	 * @returns {Promise<Object[]>} - A promise that resolves when all assets have been fetched.
+	 */
+	fetchAssets() {
+		const paths = [..._AssetFetcher.get(this).queuedAssetPaths];
+
+		let count = 0;
+		const dispatchProgressEvent = () => {
+			count += 1;
+			this.dispatchEvent(new FetchProgressEvent('fetchProgress', { progress: count / paths.length }));
+		};
+		return Promise.all(
+			paths.map(path => fetchAsset(path, dispatchProgressEvent).then(asset => [ path, asset ]))
+		)
+	}
+
+	/**
+	 * Fetch an asset, bypassing the queue.
+	 *
+	 * @param {string} path - File path/url at which the file may be found.
+	 * @returns {Promise<*>} - Returns a promise that resolves to the fetched resource.
+	 */
+	fetch(path) {
+		return fetchAsset(path)
+	}
+}
+
+const defaultData = { tilesets: [], properties: {}, tileWidth: 0, tileHeight: 0 };
+class TiledMap {
+	constructor() {
+		// New object, falling back to defaults
+		this.data = Object.assign({}, defaultData);
+		this.resources = new Map();
+		this.basePath = '';
+		this.tileTypes = [];
+		this.layers = new Map();
+		this.layerCanvases = new Map();
+		this.objects = {};
+		this.startTime = null;
+	}
+
+	get tileWidth() {
+		return this.data.tilewidth
+	}
+
+	get tileHeight() {
+		return this.data.tileheight
 	}
 
 	getObjects() {
 		return this.objects
 	}
 
-	/**
-	 * Creates in-memory representations of tiles using given tilesets.
-	 * @param  {Object[]} tilesets - Array of plain objects representing tileset data.
-	 */
-	populateTiles(tilesets) {
-		for(let tileset of tilesets) {
-			let img = this.assets[tileset.image];
+	decorate(data) {
+		this.data = Object.assign({}, defaultData, data);
+		return this
+	}
 
-			let yInc = tileset.tileheight + tileset.spacing;
-			for(let y = tileset.margin; this.tiles.length < tileset.tilecount; y += yInc) {
+	setBasePath(basePath) {
+		this.basePath = basePath;
+		return this
+	}
 
-				let xInc = tileset.tilewidth + tileset.spacing;
-				for(let x = tileset.margin, l = (tileset.columns * tileset.tilewidth); x < l; x += xInc) {
-					let obj = {
-						img: img,
-						x: x,
-						y: y,
-						width: tileset.tilewidth,
-						height: tileset.tileheight
-					};
-					let extraData = tileset.tiles && tileset.tiles[this.tiles.length];
+	getRootRelativePath(path) {
+		return (new URL(path, this.basePath)).href
+	}
 
+	getResourcePaths() {
+		const { tilesets, properties } = this.data;
+
+		// Get tile image paths
+		const paths = tilesets.map(({ image }) => image);
+
+		// Get BGM paths
+		if (properties.bgm) paths.push(properties.bgm);
+
+		return this.basePath ?
+			paths.map(path => this.getRootRelativePath(path))
+			: paths
+	}
+
+	getResource(path) {
+		path = new URL(path, this.basePath).href;
+		return this.resources.get(path)
+	}
+
+	setResources(resources) {
+		this.resources = new Map(resources);
+
+		// Post-loading setup
+		const { data } = this;
+		this.initTileTypes(data.tilesets);
+		this.initLayers(data.layers);
+		this.initLayerCanvases(this.tileWidth, this.tileHeight, this.tileTypes, this.layers);
+
+		return this
+	}
+
+	initTileTypes(tilesets) {
+		tilesets.forEach((tileset) => {
+			const image = this.getResource(tileset.image);
+			const yStep = tileset.tileheight + tileset.spacing;
+			const xStep = tileset.tilewidth + tileset.spacing;
+			const pixelsAcross = tileset.columns * tileset.tilewidth;
+
+			// Each loop, x and y represent the top left corner of each tile in the set
+			for(let y = tileset.margin; this.tileTypes.length < tileset.tilecount; y += yStep) {
+				for(let x = tileset.margin; x < pixelsAcross; x += xStep) {
+
+					// Create base tile type object
+					const obj = { image, x, y, width: tileset.tilewidth, height: tileset.tileheight };
+
+					// Add animation data to the tile type object (if any)
+					const extraData = tileset.tiles && tileset.tiles[this.tileTypes.length];
 					if(extraData && extraData.animation) {
 						let rangeStart = 0;
 						let rangeEnd = 0;
-						obj.animation = [];
-
-						for(let step of extraData.animation) {
+						obj.animation = extraData.animation.map((step) => {
 							rangeStart = rangeEnd;
 							rangeEnd = rangeStart + step.duration;
-							obj.animation.push({
-								rangeStart: rangeStart,
-								rangeEnd: rangeEnd,
-								tileid: step.tileid
-							});
-						}
+							return { rangeStart, rangeEnd, tileid: step.tileid }
+						});
 					}
 
-					this.tiles.push(obj);
+					// Add tile type to list
+					this.tileTypes.push(obj);
 				}
 			}
-		}
+		});
 	}
 
-	/**
-	 * Creates in-memory representations of layers and objects using given layers data.
-	 * @param  {Object[]} layers - Array of plain objects representing layer data.
-	 */
-	populateLayers(layers) {
-		for(let layer of layers) {
-			if(layer.data && layer.type === 'tilelayer') {
-				let layerData = Utilities.createArray(layer.width, layer.height);
-				let idx = 0;
+	initLayers(layers) {
 
-				for(let y = 0, l = layer.height; y < l; y++) {
-					for(let x = 0, l2 = layer.width; x < l2; x++) {
-						layerData[x][y] = layer.data[idx++];
-					}
+		// Handle tile layers
+		const tileLayers = layers.filter(layer => layer.data && layer.type === 'tilelayer');
+		this.layers = new Map(tileLayers.map((layer) => {
+			const data = createArray(layer.width, layer.height);
+			let idx = 0;
+
+			for(let y = 0, l = layer.height; y < l; y++) {
+				for(let x = 0, l2 = layer.width; x < l2; x++) {
+					data[x][y] = layer.data[idx++];
 				}
+			}
 
-				this.layers[layer.name] = {
-					width: layer.width,
-					height: layer.height,
-					data: layerData
+			return [ layer.name, { width: layer.width, height: layer.height, data } ]
+		}));
+
+		// Handle object layers
+		const objectLayers = layers.filter(layer => layer.type === 'objectgroup');
+		this.objects = objectLayers.reduce((objects, layer) => {
+			layer.objects.forEach((objectData) => {
+
+				// Grab base object properties
+				const object = {
+					width: objectData.width,
+					height: objectData.height,
+					x: objectData.x,
+					y: objectData.y,
+					type: objectData.type || layer.name,
+					name: objectData.name
 				};
-			} else if (layer.type === 'objectgroup') {
-				let objects = layer.objects;
-				for(let object of objects) {
-					let obj = {
-						width: object.width,
-						height: object.height,
-						x: object.x,
-						y: object.y,
-						type: object.type || layer.name,
-						name: object.name
-					};
 
-					for(let key in object.properties) {
-						obj[key] = object.properties[key];
-					}
-
-					this.objects.push(obj);
-				}
-			}
-		}
+				// Merge properties found in objectData.properties into base object
+				Object.assign(object, objectData.properties);
+				objects.push(object);
+			});
+			return objects
+		}, []);
 	}
 
-	/**
-	 * Creates and draws canvases for each layer in this.layers. Only non-animated tiles are drawn.
-	 */
-	populateLayerCanvases() {
+	initLayerCanvases(tileWidth, tileHeight, tileTypes, layers) {
+		layers = [...layers]; // convert to array
+		this.layerCanvases = new Map(
+			layers.map(([layerName, layer]) => {
+				let canvas = document.createElement('canvas');
+				canvas.width = layer.width * tileWidth;
+				canvas.height = layer.height * tileHeight;
+				let context = canvas.getContext('2d');
 
-		for (let layerName in this.layers) {
-			let layer = this.layers[layerName];
-			let canvas = document.createElement('canvas');
-			canvas.width = layer.width * this.tileWidth;
-			canvas.height = layer.height * this.tileHeight;
-			let context = canvas.getContext('2d');
+				if (layer && layer.data) {
+					for (let y = 0, l = layer.height; y < l; y++) {
+						for (let x = 0, l2 = layer.width; x < l2; x++) {
+							const tileType = tileTypes[layer.data[x][y] - 1];
+							const posX = x * tileWidth;
+							const posY = y * tileHeight;
 
-			if(layer && layer.data) {
-				for(let y = 0, l = layer.height; y < l; y++) {
-					for(let x = 0, l2 = layer.width; x < l2; x++) {
-						let tile = this.tiles[layer.data[x][y] - 1];
-						let posX = x * this.tileWidth;
-						let posY = y * this.tileHeight;
-
-						if(tile && tile.animation === undefined) {
-							context.drawImage(
-								tile.img,
-								tile.x,
-								tile.y,
-								tile.width,
-								tile.height,
-								posX,
-								posY,
-								this.tileWidth,
-								this.tileHeight
-							);
-						}
-
-					}
-				}
-			}
-
-			this.layerCanvases[layerName] = canvas;
-		}
-
-	}
-
-	/**
-	 * Render animated tiles within the given area of a layer (tile frame depends on given time).
-	 * @param  {CanvasRenderingContext2D} context - Provides API to draw on a canvas.
-	 * @param  {string} layerName                 - Key referencing layer in this.layers.
-	 * @param  {DOMHighResTimeStamp} time         - Time in milliseconds since first render.
-	 * @param  {number} tileX1                    - x-coordinate at top left in number of tiles from left.
-	 * @param  {number} tileY1                    - y-coordinate at top left in number of tiles from left.
-	 * @param  {number} tileX2                    - x-coordinate at bottom right in number of tiles from left.
-	 * @param  {number} tileY2                    - y-coordinate at bottom right in number of tiles from left.
-	 * @param  {number} dX                        - x-coordinate at top left of destination in pixels from left.
-	 * @param  {number} dY                        - y-coordinate at top left of destination in pixels from left.
-	 * @param  {number} scaleW                    - scaling for width.
-	 * @param  {number} scaleH                    - scaling for height.
-	 */
-	renderAnimatedTiles(context, layerName, time, tileX1, tileY1, tileX2, tileY2, dX, dY, scaleW, scaleH) {
-		let layer = this.layers[layerName];
-
-		if(layer && layer.data) {
-			for(let y = tileY1, l = Math.min(layer.height, tileY2); y < l; y++) {
-				for(let x = tileX1, l2 = Math.min(layer.width, tileX2); x < l2; x++) {
-					let colData = layer.data[x];
-					let tileIdx = colData && colData[y];
-					let tile = tileIdx && this.tiles[tileIdx - 1];
-					let posX = (x * this.tileWidth) + dX;
-					let posY = (y * this.tileHeight) + dY;
-
-					if(tile && tile.animation) {
-						let wrappedTime = time % tile.animation[tile.animation.length - 1].rangeEnd;
-						for(let step of tile.animation) {
-							if(wrappedTime > step.rangeStart && wrappedTime < step.rangeEnd) {
-								tile = this.tiles[step.tileid];
+							if (tileType && tileType.animation === undefined) {
+								context.drawImage(tileType.image,
+									tileType.x, tileType.y, tileType.width, tileType.height,
+									posX, posY, tileWidth, tileHeight
+								);
 							}
+
 						}
-
-						context.drawImage(
-							tile.img,
-							tile.x,
-							tile.y,
-							tile.width,
-							tile.height,
-							posX,
-							posY,
-							this.tileWidth * scaleW,
-							this.tileHeight * scaleH
-						);
-
 					}
+				}
+
+				return [ layerName, canvas ]
+			})
+		);
+	}
+
+	renderAnimatedTiles(context, layerName, time, tileX1, tileY1, tileX2, tileY2, dX, dY, scaleW, scaleH) {
+		const layer = this.layers.get(layerName);
+
+		if (!layer) return
+
+		// Adjust values to ensure we are operating within the layer boundaries
+		tileY1 = Math.max(tileY1, 0);
+		tileY2 = Math.min(tileY2, layer.height);
+		tileX1 = Math.max(tileX1, 0);
+		tileX2 = Math.min(tileX2, layer.width);
+
+		// Loop through each tile within the area specified in tileX1, Y1, X2, Y2
+		for (let y = tileY1; y < tileY2; y++) {
+			for (let x = tileX1; x < tileX2; x++) {
+				const tileIdx = layer.data[x][y];
+				if (tileIdx === 0) continue
+
+				const posX = (x * this.tileWidth) + dX;
+				const posY = (y * this.tileHeight) + dY;
+
+				// If the tile is animated, determine the tile type to be used at this point in time
+				let tileType = this.tileTypes[tileIdx - 1];
+				if (tileType.animation) {
+					const wrappedTime = time % tileType.animation[tileType.animation.length - 1].rangeEnd;
+					for (let step of tileType.animation) {
+						if (wrappedTime > step.rangeStart && wrappedTime < step.rangeEnd) {
+							tileType = this.tileTypes[step.tileid];
+							break
+						}
+					}
+
+					context.drawImage(
+						tileType.img,
+						tileType.x,
+						tileType.y,
+						tileType.width,
+						tileType.height,
+						posX,
+						posY,
+						this.tileWidth * scaleW,
+						this.tileHeight * scaleH
+					);
+
 				}
 			}
 		}
 
 	}
 
-	/**
-	 * Render given area of a layer.
-	 * @param  {CanvasRenderingContext2D} context - Provides API to draw on a canvas.
-	 * @param  {string} layerName                 - Key referencing layer in this.layers.
-	 * @param  {DOMHighResTimeStamp} timestamp    - Current time in milliseconds.
-	 * @param  {number} sX                        - x-coordinate at top left of source in pixels from left.
-	 * @param  {number} sY                        - y-coordinate at top left of source in pixels from left.
-	 * @param  {number} sW                        - width of source in pixels.
-	 * @param  {number} sH                        - height of source in pixels.
-	 * @param  {number} dX                        - x-coordinate at top left of destination in pixels from left.
-	 * @param  {number} dY                        - y-coordinate at top left of destination in pixels from left.
-	 * @param  {number} dW                        - width of destination in pixels.
-	 * @param  {number} dH                        - height of destination in pixels.
-	 */
 	render(context, layerName, timestamp, sX, sY, sW, sH, dX, dY, dW, dH) {
-		// Note: May need to use context.getImageData() and .putImageData() for transparency support instead of .drawImage()
+		// NOTE: May need to use context.getImageData() and .putImageData() for transparency support instead of .drawImage()
 		// ...I tried these but they created memory leaks when debugging with Chrome
 
 		this.startTime = this.startTime || timestamp;
 
-		let canvas = this.layerCanvases[layerName];
+		const canvas = this.layerCanvases.get(layerName);
 
-		if(canvas) {
+		if (canvas) {
 
 			// Draw static parts of layer
 			context.drawImage(canvas, sX, sY, sW, sH, dX, dY, dW, dH);
@@ -663,391 +1566,6 @@ class TiledMap extends AssetUser {
 
 	}
 }
-
-/**
- * GameEngine module.
- * @module Engine
- */
-
-const assetManager = new AssetManager();
-
-/** Class representing a Game Engine. */
-class GameEngine extends AssetUser {
-
-	/**
-	 * Create a Game Engine.
-	 * @param {string} mapPath - URL to the map JSON data.
-	 * @param {EntityFactory} entityFactory - Instance of an EntityFactory. Used when calling addEntity() method.
-	 */
-	constructor(mapPath, entityFactory) {
-		super();
-		this.mapPath = mapPath;
-		this.loadingPhase = 0;
-		this.runAfterLoad = false;
-		this.systems = {};
-		this.entityManager = new EntityManager(entityFactory);
-
-		// Queue downloads for overall game....Should this be somehow combined with the addSystems() logic? I copied and edited this logic from there
-		let loop = () => {
-			let pathsOrObjs = this.getAssetPaths();
-			if(!this.loaded) {
-				if(pathsOrObjs.length > 0) {
-					assetManager.queueDownloads(pathsOrObjs);
-				}
-				let paths = pathsOrObjs.map(function(pathOrObj) {
-					return pathOrObj.path ? pathOrObj.path : pathOrObj // Ensure each item is a path string
-				});
-
-				assetManager.downloadAll(() => {
-					let assets = {};
-					paths.forEach(function(pathStr) {
-						assets[pathStr] = assetManager.getAsset(pathStr);
-					});
-
-					this.onAssetsLoaded(assets);
-
-					if(!this.loaded) {
-						loop();
-						return
-					}
-
-					this.addSystems();
-				});
-			}
-		};
-		loop();
-
-	}
-
-	/**
-	 * @returns {array}  Array of path strings or plain objects with a "path" and "reviver" function (for JSON)
-	 */
-	getAssetPaths() {
-		switch(this.loadingPhase) {
-			case 0:
-				return [{
-					path: this.mapPath,
-					reviver: function(data) {
-						return new TiledMap(data)
-					}
-				}]
-			case 1:
-				return this.map.getAssetPaths()
-		}
-	}
-
-	/**
-	 * Event handler function - Store downloaded assets
-	 * @param {Object} assets - Plain object that works as an associative array. Each item key is a path from "getAssetPaths()"
-	 */
-	onAssetsLoaded(assets) {
-		let objects;
-
-		switch(this.loadingPhase) {
-			case 0:
-				this.map = assets[this.mapPath];
-				break
-			case 1:
-				this.map.onAssetsLoaded(assets);
-
-				// Create entities for each object type
-				objects = this.map.getObjects();
-				for(let object of objects) {
-					this.addEntity(object.type, object);
-				}
-
-				super.onAssetsLoaded();
-				break
-		}
-		this.loadingPhase++;
-	}
-
-	/**
-	 * Get an array of Entity instances.
-	 * @param  {string=} subsetName - Name of entity subset.
-	 * @returns {Entity[]}  Entity instances for this game.
-	 */
-	getEntities(subsetName) {
-		return this.entityManager.getEntities(subsetName)
-	}
-
-	/**
-	 * Create a subset of the Entity array for this game.
-	 * @param  {string} subsetName - Name of component used to get subset.
-	 * @param  {function} mapper - Function to help determine if an Entity should be a part of this subset.
-	 */
-	addEntitySubset(subsetName, mapper) {
-		this.entityManager.addEntitySubset(subsetName, mapper);
-	}
-
-	/**
-	 * Add an Entity.
-	 * @param  {string} entityType - Type of Entity to add to this game.
-	 * @param {Object} data - Plain object representing the component data.
-	 * @returns {Entity}  Entity that was added
-	 */
-	addEntity(entityType, data) {
-		return this.entityManager.addEntity(entityType, data)
-	}
-
-	/**
-	 * Remove an Entity.
-	 * @param {Entity}  entity - Entity instance to be removed
-	 */
-	removeEntity(entity) {
-		this.entityManager.removeEntity(entity);
-	}
-
-	/**
-	 * Adds a System to this game.
-	 * @param {string} systemName - Key to use for the system.
-	 * @param {System} system - System to add
-	 */
-	addSystem(systemName, system) {
-		this.systems[systemName] = system;
-
-		let subsets = system.getRequiredSubsets();
-		for(let subsetKey in subsets) {
-			let mapper = subsets[subsetKey];
-			this.addEntitySubset(subsetKey, mapper);
-		}
-
-		// Share the same entityManager instance with each system
-		system.setEntityManager(this.entityManager);
-	}
-
-	/**
-	 * Instantiate and add Systems for this game.
-	 */
-	addSystems() {
-		let loop = () => {
-			let callbackObjs = [];
-
-			// Queue downloads for each system, keep track of callbacks
-			for(let systemKey in this.systems) {
-				let system = this.systems[systemKey];
-				let pathsOrObjs = system.getAssetPaths();
-				if(!system.loaded && !system.processing) {
-					if(pathsOrObjs.length > 0) {
-						assetManager.queueDownloads(pathsOrObjs);
-					}
-					callbackObjs.push({
-						system: system,
-						paths: pathsOrObjs.map(function(pathOrObj) {
-							return pathOrObj.path ? pathOrObj.path : pathOrObj // Ensure each item is a path string
-						})
-					});
-				}
-			}
-
-			// Download all queued assets, run callbacks (feed requested assets)
-			assetManager.downloadAll(() => {
-				let systemsLoaded = true;
-				for(let callbackObj of callbackObjs) {
-
-					let assets = {};
-					callbackObj.paths.forEach(function(pathStr) {
-						assets[pathStr] = assetManager.getAsset(pathStr);
-					});
-
-					callbackObj.system.onAssetsLoaded(assets);
-					systemsLoaded = systemsLoaded && callbackObj.system.loaded;
-				}
-
-				// If any system was not loaded, loop again
-				if(!systemsLoaded) {
-					loop();
-					return
-				}
-
-				// Otherwise, flag engine as "loaded" and...
-				this.loaded = true;
-
-				// *call this.run() if an attempt was made to call this.run() before loading was completed
-				if(this.runAfterLoad) { this.run(); }
-			});
-		};
-		loop();
-	}
-
-	/**
-	 * Fire main loop, which continuously iterates over and runs each System.
-	 */
-	run() {
-
-		// *If we haven't finished loading, mark a flag to run after load and return
-		if(!this.loaded) {
-			this.runAfterLoad = true;
-			return
-		}
-
-		// Define the main loop function
-		let main = (timestamp) => {
-
-			// Loop over systems (ECS design pattern)
-			for(let systemKey in this.systems) {
-				this.systems[systemKey].run(timestamp);
-			}
-
-			// Keep loop going by making an asynchronous, recursive call to main loop function
-			window.requestAnimationFrame(main);
-		};
-
-		// Run main loop function
-		main(performance.now());
-	}
-}
-
-/**
- * System module.
- * @module System
- */
-
-/**
- * Class that acts as an interface/abstract class for a System (the "S" in the ECS design pattern). Please avoid instantiating directly.
- * @interface
- * */
-class System extends AssetUser {
-
-	/**
-	 * Create a System.
-	 */
-	constructor() {
-		super();
-		if (this.constructor === System) {
-			throw new Error('Can\'t instantiate System! (abstract class)')
-		}
-		this.entityManager = null;
-	}
-
-	/**
-	 * Sets the internal function used to get entities from an external source
-	 * @param  {EntityManager} entityManager - Provides an API for an entity collection.
-	 */
-	setEntityManager(entityManager) {
-		this.entityManager = entityManager;
-	}
-
-	/**
-	 * Wrapper for ._getEntities() function - set using .setEntityGetter() (checks if we correctly set up "getRequiredSubsets()" method)
-	 * @param {string} subsetName - Name of entity subset to use.
-	 * @returns {Entity[]}  List of entities
-	 */
-	getEntities(subsetName) {
-		if(!subsetName || this.getRequiredSubsets()[subsetName]) {
-			return this.entityManager && this.entityManager.getEntities(subsetName)
-		}
-
-		throw new Error('You must override .getRequiredSubset() to set up subsets before calling .getEntities(subsetName)')
-	}
-
-	/**
-	 * Add an Entity.
-	 * @param  {string} entityType - Type of Entity to add to this game.
-	 * @param {Object} data - Plain object representing the component data.
-	 * @returns {Entity}  Entity that was added
-	 */
-	addEntity(entityType, data) {
-		return this.entityManager && this.entityManager.addEntity(entityType, data)
-	}
-
-	/**
-	 * Remove an Entity.
-	 * @param {Entity}  entity - Entity instance to be removed
-	 */
-	removeEntity(entity) {
-		this.entityManager && this.entityManager.removeEntity(entity);
-	}
-
-	/**
-	 * Gets subset info (helps GameEngine with caching).
-	 * @returns {Object}  Plain object used as an associative array. It contains functions which check if a given entity meets criteria.
-	 */
-	getRequiredSubsets() {
-		return {}
-	}
-
-	/**
-	 * Method that is called once per iteration of the main game loop.
-	 * @param  {DOMHighResTimeStamp} timestamp - Current time in milliseconds.
-	 */
-	run() {
-		throw new Error('You must override .run(). (abstract method)')
-	}
-}
-
-/**
- * ExampleSpawnerSystem module.
- * @module ExampleSpawnerSystem
- */
-
-
-/** Class representing a particular type of System used for creating entities. Not intended to be part of final game engine.
- * @extends System
- */
-class ExampleSpawnerSystem extends System {
-	constructor() {
-		super();
-		this.lastUpdate = null;
-	}
-
-	/**
-	 * Gets subset info (helps GameEngine with caching).
-	 * @returns {Object}  Plain object used as an associative array. It contains functions which check if a given entity meets criteria.
-	 */
-	getRequiredSubsets() {
-		return {
-			spawner: function(entity) {
-				return entity.hasComponent('spawner')
-			},
-			spawned: function(entity) {
-				return entity.hasComponent('spawned')
-			}
-		}
-	}
-
-	/**
-	 * Method that is called once per iteration of the main game loop.
-	 * Renders map (and, in the future, Entity objects with sprite components).
-	 * @param  {DOMHighResTimeStamp} timestamp - Current time in milliseconds.
-	 */
-	run(timestamp) {
-		this.lastUpdate = this.lastUpdate || timestamp;
-
-		// Get all spawners
-		let spawnerEntities = this.getEntities('spawner');
-
-		// Filter to only the spawners that are ready to spawn
-		let readySpawners = spawnerEntities.filter((spawnerEntity) => {
-			let ready = true;
-			let spawnedEntities = this.getEntities('spawned');
-			for(let spawnedEntity of spawnedEntities) {
-				if(spawnedEntity.getComponent('spawned').spawnerSource === spawnerEntity.getComponent('spawner').name) {
-					ready = false;
-					break
-				}
-			}
-			return ready
-		});
-
-		// Create a new spawned entity for each "ready" spawner
-		for(let readySpawner of readySpawners) {
-			let spawnerComp = readySpawner.getComponent('spawner');
-
-			this.addEntity(spawnerComp.entityType, {
-				x: spawnerComp.x,
-				y: spawnerComp.y,
-				spawnerSource: spawnerComp.name
-			});
-		}
-
-	}
-}
-
-/**
- * InputManager module.
- * @module InputManager
- */
 
 const keyboardInputs = Symbol();
 
@@ -1171,133 +1689,134 @@ class InputManager {
 }
 
 /**
- * ExampleUpdateSystem module.
- * @module ExampleUpdateSystem
+ * Game module.
+ * @module Game
  */
 
-/** Class representing a particular type of System used for updating entities. Not intended to be part of final game engine.
- * @extends System
- */
-class ExampleUpdateSystem extends System {
-	constructor() {
-		super();
-		this.lastUpdate = null;
-		this.maxUpdateRate = 60 / 1000;
-		this.inputManager = new InputManager();
-	}
+/** Object representing the module namespace. */
+const namespace = {
+	createCollection(...args) {
+		return new Collection(...args)
+	},
 
-	/**
-	 * Gets subset info (helps GameEngine with caching).
-	 * @returns {Object}  Plain object used as an associative array. It contains functions which check if a given entity meets criteria.
-	 */
-	getRequiredSubsets() {
-		return {
-			player: function(entity) {
-				return entity.hasComponent('being') && entity.getComponent('being').type === 'Player'
-			}
-		}
-	}
+	createIndexedCollection(...args) {
+		return new IndexedCollection(...args)
+	},
 
-	/**
-	 * Method that is called once per iteration of the main game loop.
-	 * Renders map (and, in the future, Entity objects with sprite components).
-	 * @param  {DOMHighResTimeStamp} timestamp - Current time in milliseconds.
-	 */
-	run(timestamp) {
-		this.lastUpdate = this.lastUpdate || timestamp;
-		if(this.maxUpdateRate && timestamp - this.lastUpdate < this.maxUpdateRate) return
+	createEvent(type, options) {
+		return new GameEvent(type, options)
+	},
 
-		let playerEntities = this.getEntities('player');
-		for(let playerEntity of playerEntities) {
-			let c = playerEntity.getComponent('physicsBody');
-			let state = playerEntity.getComponent('state');
-			let sprite = playerEntity.getComponent('sprite');
+	createFactory() {
+		return new Factory()
+	},
 
-			if(this.inputManager.leftButton.held) {
-				c.accX = -0.2;
-				state.state = 'driving';
-				sprite.flipped = true;
-			} else if(this.inputManager.rightButton.held) {
-				c.accX = 0.2;
-				state.state = 'driving';
-				sprite.flipped = false;
-			} else {
-				c.accX = 0;
-				if(c.spdX === 0) state.state = 'idle';
-			}
+	createEntity() {
+		return new Entity()
+	},
 
-			if(state.state === 'driving') {
-				sprite.frame = (parseInt(c.x / 6) % 4) + 1;
-			}
+	createComponent(dataObj) {
+		return new Component(dataObj)
+	},
 
-			if(this.inputManager.jumpButton.pressed && state.grounded) { c.spdY = -100; }
-		}
+	createSystem() {
+		return new System()
+	},
 
-		this.lastUpdate = timestamp;
-	}
-}
+	createScene() {
+		return new Scene()
+	},
 
-/**
- * ExamplePhysicsSystem module.
- * @module ExamplePhysicsSystem
- */
+	createGame() {
+		return new Game()
+	},
+
+	createAssetFetcher() {
+		return new AssetFetcher()
+	},
+
+	createTiledMap() {
+		return new TiledMap()
+	},
+
+	createInputManager() {
+		return new InputManager()
+	},
+
+	createEntityFactory() {
+		return (new Factory()).use((constructorName, data = {}) =>
+			({
+				componentFactory: this.createComponentFactory(),
+				entity: new Entity(),
+				data,
+			})
+		)
+	},
+
+	createComponentFactory() {
+		return (new Factory()).use((constructorName, data = {}) =>
+			({
+				component: new Component(),
+				data,
+			})
+		)
+	},
+
+	createSystemFactory() {
+		return (new AsyncFactory()).use(async (constructorName, data = {}) =>
+			({
+				system: new System(),
+				data,
+			})
+		)
+	},
+
+	createSceneFactory() {
+		return (new AsyncFactory()).use(async (constructorName, data = {}) =>
+			({
+				entityFactory: this.createEntityFactory(),
+				systemFactory: this.createSystemFactory(),
+				scene: new Scene(),
+				data,
+			})
+		)
+	},
+};
 
 const MAX_SPEED_X = 2.2;
 const MAX_SPEED_Y = 4.1;
 const GRAVITY = 0.3;
 const FRICTION = 0.08;
 
-/** Class representing a particular type of System used for applying simple physics to entities. Not intended to be part of final game engine.
- * @extends System
- */
-class ExamplePhysicsSystem extends System {
-	constructor() {
-		super();
-		this.lastUpdate = null;
-		this.maxUpdateRate = 60 / 1000;
-	}
+// TODO: Move this to Game?
+const indexComponents = (entities, compNames = []) =>
+	compNames.forEach(compName =>
+		entities.setIndex(compName, entity => entity.getComponent(compName))
+	);
 
-	/**
-	 * Gets subset info (helps GameEngine with caching).
-	 * @returns {Object}  Plain object used as an associative array. It contains functions which check if a given entity meets criteria.
-	 */
-	getRequiredSubsets() {
-		return {
-			staticPhysicsBody: function(entity) {
-				return entity.hasComponent('staticPhysicsBody')
-			},
-			physicsBody: function(entity) {
-				return entity.hasComponent('physicsBody')
-			}
-		}
-	}
+var createPhysicsSystem = async (systemName, { system }) => system
+	.addEventListener('mounted', ({ entities }) => {
+		indexComponents(entities, ['staticPhysicsBody', 'physicsBody']);
+	})
 
-	/**
-	 * Method that is called once per iteration of the main game loop.
-	 * Renders map (and, in the future, Entity objects with sprite components).
-	 * @param  {DOMHighResTimeStamp} timestamp - Current time in milliseconds.
-	 */
-	run(timestamp) {
-		this.lastUpdate = this.lastUpdate || timestamp;
-		let deltaTime = timestamp - this.lastUpdate;
-		if(this.maxUpdateRate && deltaTime < this.maxUpdateRate) return
-
-		let staticEntities = this.getEntities('staticPhysicsBody');
-		let nonstaticEntities = this.getEntities('physicsBody');
+	.addEventListener('update', ({ entities, deltaTime }) => {
+		const staticComponents = entities.getIndexed('staticPhysicsBody');
+		const nonstaticComponents = entities.getIndexed('physicsBody');
 
 		// For every nonstatic physics body, check for static physics body collision
-		for(let nonstaticEntity of nonstaticEntities) {
-			let c = nonstaticEntity.getComponent('physicsBody');
-			let state = nonstaticEntity.getComponent('state');
-			let wasGrounded = state.grounded;
+		for (const c of nonstaticComponents) {
+			const state = c.getParentEntity().getComponent('state');
+			const wasGrounded = state.grounded;
 			state.grounded = false; // Only set to true after a collision is detected
 
 			c.accY = GRAVITY; // Add gravity (limit to 10)
 
 			// Add acceleration to "speed"
-			let time = deltaTime / 10;
-			c.spdX = c.spdX + (c.accX / time);
-			c.spdY = c.spdY + (c.accY / time);
+			const time = deltaTime / 10;
+			if (time !== 0) {
+				c.spdX = c.spdX + (c.accX / time);
+				c.spdY = c.spdY + (c.accY / time);
+			}
 
 			// Limit speed
 			c.spdX = c.spdX >= 0 ? Math.min(c.spdX, MAX_SPEED_X) : Math.max(c.spdX, MAX_SPEED_X * -1);
@@ -1307,18 +1826,16 @@ class ExamplePhysicsSystem extends System {
 			c.x += c.spdX;
 			c.y += c.spdY;
 
-			for(let staticEntity of staticEntities) {
-				let c2 = staticEntity.getComponent('staticPhysicsBody');
-
-				let halfWidthSum = c.halfWidth + c2.halfWidth;
-				let halfHeightSum = c.halfHeight + c2.halfHeight;
-				let deltaX = c2.midPointX - c.midPointX;
-				let deltaY = c2.midPointY - c.midPointY;
-				let absDeltaX = Math.abs(deltaX);
-				let absDeltaY = Math.abs(deltaY);
+			for (const c2 of staticComponents) {
+				const halfWidthSum = c.halfWidth + c2.halfWidth;
+				const halfHeightSum = c.halfHeight + c2.halfHeight;
+				const deltaX = c2.midPointX - c.midPointX;
+				const deltaY = c2.midPointY - c.midPointY;
+				const absDeltaX = Math.abs(deltaX);
+				const absDeltaY = Math.abs(deltaY);
 
 				// Collision Detection
-				if(
+				if (
 					(halfWidthSum > absDeltaX) &&
 					(halfHeightSum > absDeltaY)
 				) {
@@ -1326,47 +1843,244 @@ class ExamplePhysicsSystem extends System {
 					let projectionX = halfWidthSum - absDeltaX;  // Value used to correct positioning
 
 					// Use the lesser of the two projection values
-					if(projectionY < projectionX) {
-						if(deltaY > 0) projectionY *= -1;
-						// alert('move along y axis: ' + projectionY)
-						c.y += projectionY; // Apply "projection vector" to rect1
-						if(c.spdY > 0 && deltaY > 0) c.spdY = 0;
-						if(c.spdY < 0 && deltaY < 0) c.spdY = 0;
+					if (projectionY < projectionX) {
+						if (deltaY > 0) projectionY *= -1;
 
-						if(projectionY < 0) {
-							if(!wasGrounded) { state.groundHit = true; } else { state.groundHit = false; }
+						c.y += projectionY; // Apply "projection vector" to rect1
+						if (c.spdY > 0 && deltaY > 0) c.spdY = 0;
+						if (c.spdY < 0 && deltaY < 0) c.spdY = 0;
+
+						if (projectionY < 0) {
+							if (!wasGrounded) { state.groundHit = true; } else { state.groundHit = false; }
 							state.grounded = true;
-							if(c.spdX > 0) {
+							if (c.spdX > 0) {
 								c.spdX = Math.max(c.spdX - (FRICTION / time), 0);
 							} else {
 								c.spdX = Math.min(c.spdX + (FRICTION / time), 0);
 							}
 						}
 					} else {
-						if(deltaX > 0) projectionX *= -1;
-						// alert('move along x axis: ' + projectionX)
+						if (deltaX > 0) projectionX *= -1;
+
 						c.x += projectionX; // Apply "projection vector" to rect1
-						if(c.spdX > 0 && deltaX > 0) c.spdX = 0;
-						if(c.spdX < 0 && deltaX < 0) c.spdX = 0;
+						if (c.spdX > 0 && deltaX > 0) c.spdX = 0;
+						if (c.spdX < 0 && deltaX < 0) c.spdX = 0;
 					}
 				}
 			}
 		}
+	});
 
+// TODO: Move this to Game?
+const indexComponents$1 = (entities, compNames = []) =>
+	compNames.forEach(compName =>
+		entities.setIndex(compName, entity => entity.getComponent(compName))
+	);
 
+var createRenderSystem = async (systemName, { system, tiledMap, entityFactory }) => {
+	const canvas = document.getElementById('game');
+	const context = canvas && canvas.getContext('2d');
 
-		this.lastUpdate = timestamp;
-	}
-}
+	const frames = [
+		{
+			img: 'img/monster.png',
+			x: 0,
+			y: 0,
+			width: 14,
+			height: 26
+		}, {
+			img: 'img/tankSheet.png',
+			x: 0,
+			y: 0,
+			width: 26,
+			height: 18
+		}, {
+			img: 'img/tankSheet.png',
+			x: 26,
+			y: 0,
+			width: 26,
+			height: 18
+		}, {
+			img: 'img/tankSheet.png',
+			x: 52,
+			y: 0,
+			width: 26,
+			height: 18
+		}, {
+			img: 'img/tankSheet.png',
+			x: 78,
+			y: 0,
+			width: 26,
+			height: 18
+		}
+	];
+	let images = {};
+	let flippedImages = {};
 
-/**
- * ExampleSoundSystem module.
- * @module ExampleSoundSystem
- */
+	context.mozImageSmoothingEnabled = false;
+	context.msImageSmoothingEnabled = false;
+	context.imageSmoothingEnabled = false;
 
-const _playSound = Symbol('_playSound');
+	return system
+
+		// Queue assets
+		.addEventListener('load', async ({ assetFetcher }) => {
+			assetFetcher.queueAssets([ 'img/monster.png', 'img/tankSheet.png' ]);
+		})
+
+		// Gather downloaded assets
+		.addEventListener('loaded', async ({ assets, currentTarget }) => {
+			images = {
+				'img/monster.png': assets.get('img/monster.png'),
+				'img/tankSheet.png': assets.get('img/tankSheet.png'),
+			};
+
+			// Images must be flipped and stored in flippedImages under same key
+			for (let key in images) {
+				let canvas = document.createElement('canvas');
+				let ctx = canvas.getContext('2d');
+				let image = images[key];
+
+				canvas.width = image.width;
+				canvas.height = image.height;
+
+				ctx.scale(-1, 1); // flip
+				ctx.drawImage(image, (-1 * canvas.width), 0); // draw flipped
+
+				flippedImages[key] = canvas;
+			}
+
+			currentTarget.addEntity(entityFactory.create('Camera', {
+				x: 0,
+				y: 0,
+				width: canvas.width,
+				height: canvas.height,
+				mapX: 300,
+				mapY: 820,
+				mapWidth: parseInt(canvas.width / 8),
+				mapHeight: parseInt(canvas.height / 8),
+				following: null
+			}));
+			/*
+			currentTarget.addEntity('Camera', {
+				x: canvas.width / 2,
+				y: 0,
+				width: canvas.width / 2,
+				height: canvas.height,
+				mapX: 100,
+				mapY: 920,
+				mapWidth: canvas.width / 2,
+				mapHeight: canvas.height / 2
+			})
+			*/
+		})
+
+		// Set up indexes
+		.addEventListener('mounted', ({ entities }) => {
+			indexComponents$1(entities, [ 'camera', 'sprite' ]);
+			entities.setIndex('player', (entity) => {
+				const comp = entity.getComponent('being');
+				return comp.type !== 'Player' ? undefined : entity
+			});
+		})
+
+		// Handle each update
+		.addEventListener('update', ({ entities, timestamp }) => {
+			context.clearRect(0, 0, canvas.width, canvas.height);
+
+			const [ defaultPlayerEntity ] = entities.getIndexed('player');
+
+			// Get each camera
+			const cameraComponents = entities.getIndexed('camera');
+			for (const c of cameraComponents) {
+
+				// Set up drawing layers
+				const layers = {
+					Background: { sprites: [] },
+					Platforms:  { sprites: [] },
+					Player:     { sprites: [] }
+				};
+
+				// Force camera to match followed entity
+				if (!c.following) {
+					c.following = defaultPlayerEntity;
+				}
+
+				if (c.following) {
+					const sprite = c.following.getComponent('sprite');
+					const frame = frames[sprite.frame];
+					c.mapX = sprite.x + (frame.width / 2) - (c.mapWidth / 2);
+
+					const threshold = (c.mapHeight / 4);
+					if (sprite.y < c.mapY + threshold) {
+						c.mapY = sprite.y - threshold;
+					} else if ((sprite.y + sprite.height) > c.mapY + c.mapHeight - threshold) {
+						c.mapY = sprite.y + sprite.height - (c.mapHeight - threshold);
+					}
+				}
+
+				// Get entities with a sprite component and add to the appropriate layer for rendering
+				const spriteComponents = entities.getIndexed('sprite');
+				for (const sprite of spriteComponents) {
+					const frame = frames[sprite.frame];
+					const img = !sprite.flipped ? images[frame.img] : flippedImages[frame.img];
+
+					sprite.width = frame.width;
+					sprite.height = frame.height;
+
+					const obj = {
+						img: img,
+						x: sprite.x - c.mapX,
+						y: sprite.y - c.mapY,
+						width: frame.width,
+						height: frame.height,
+						sx: frame.x,
+						sy: frame.y
+					};
+
+					if (
+						obj.x + obj.width > 0 && obj.x < c.mapWidth &&
+						obj.y + obj.height > 0 && obj.y < c.mapHeight
+					) {
+						layers[sprite.layer].sprites.push(obj);
+					}
+				}
+
+				// Draw each map layer (include all sprites for that layer)
+				for (const layerKey in layers) {
+					const layer = layers[layerKey];
+
+					const mapX = Math.round(c.mapX);
+					const mapY = Math.round(c.mapY);
+					const mapWidth = parseInt(c.mapWidth);
+					const mapHeight = parseInt(c.mapHeight);
+					const x = parseInt(c.x);
+					const y = parseInt(c.y);
+					const width = parseInt(c.width);
+					const height = parseInt(c.height);
+
+					tiledMap.render(context, layerKey, timestamp, mapX, mapY, mapWidth, mapHeight, x, y, width, height);
+
+					// Draw each sprite to a temporary canvas
+					if (layer.sprites.length > 0) {
+						const tempCanvas = document.createElement('canvas');
+						tempCanvas.width = mapWidth;
+						tempCanvas.height = mapHeight;
+						const tempCtx = tempCanvas.getContext('2d');
+						for(let sprite of layer.sprites) {
+							tempCtx.drawImage(sprite.img, parseInt(sprite.sx), parseInt(sprite.sy), parseInt(sprite.width), parseInt(sprite.height), Math.round(sprite.x), Math.round(sprite.y), parseInt(sprite.width), parseInt(sprite.height));
+						}
+
+						// Draw the temporary canvas to the main canvas (position and fit to camera bounds)
+						context.drawImage(tempCanvas, 0, 0, mapWidth, mapHeight, x, y, width, height);
+					}
+				}
+			}
+		})
+};
+
+// TimeOffset class
 const _time = Symbol('_time');
-
 class TimeOffset {
 	constructor(timeStr, millisecondsMode) {
 		this[_time] = timeStr;
@@ -1391,612 +2105,329 @@ class TimeOffset {
 	}
 }
 
-// This is a fix (just in case we only have the webkit prefixed version)
-window.AudioContext = window.AudioContext || window.webkitAudioContext;
+// TODO: Move this to Game?
+const indexComponents$2 = (entities, compNames = []) =>
+	compNames.forEach(compName =>
+		entities.setIndex(compName, entity => entity.getComponent(compName))
+	);
 
-/** Class representing a particular type of System used for playing sound effects and music. Not intended to be part of final game engine.
- * @param {TiledMap} map - The loaded map.
- */
-class ExampleSoundSystem extends System {
-	constructor(map) {
-		super();
-		this.lastUpdate = null;
-		this.maxUpdateRate = 60 / 1000;
-		this.map = map;
-		this.context = new AudioContext();
-		this.tracks = {};
-		this.bgmPlay = false;
-		this.bgmLoopTarget = new TimeOffset(map.bgmLoopTarget);
+var createSoundSystem = async (systemName, { system, tiledMap }) => {
+	const context = new AudioContext();
+	const tracks = {};
+	const bgmLoopTarget = new TimeOffset(tiledMap.bgmLoopTarget);
+	let bgmPlay = !!tiledMap.bgm;
 
-		this.masterVolume = 1;
-	}
-
-	/**
-	 * Gets subset info (helps GameEngine with caching).
-	 * @returns {Object}  Plain object used as an associative array. It contains functions which check if a given entity meets criteria.
-	 */
-	getRequiredSubsets() {
-		return {
-			camera: function(entity) {
-				return entity.hasComponent('camera')
-			},
-			sound: function(entity) {
-				return entity.hasComponent('sound')
-			}
-		}
-	}
-
-	/**
-	 * @returns {array}  Array of path strings or plain objects with a "path" and "reviver" function (for JSON).
-	 */
-	getAssetPaths() {
-		return [
-			'sfx/sfx1.wav'
-		]
-	}
-
-	/**
-	 * Event handler function - Store downloaded assets.
-	 * @param {Object} assets - Plain object that works as an associative array. Each item key is a path from "getAssetPaths()".
-	 */
-	onAssetsLoaded(assets) {
-		let callback = () => {
-			super.onAssetsLoaded();
-		};
-
-		if(this.map.bgm) {
-			this.bgmPlay = true;
-			assets['bgm'] = this.map.bgm;
-		}
-
-		let total = Object.keys(assets).length;
-
-		let count = 0;
-		for(let key in assets) {
-			let asset = assets[key];
-
-			this.context.decodeAudioData(asset, (decodedData) => {
-				this.tracks[key] = decodedData;
-
-				count++;
-				if(count >= total) {
-					callback();
-					return
-				}
-			});
-		}
-
-		this.processing = true; // prevents engine from continuously trying to load assets while we are processing
-	}
-
-	[_playSound](src, startAt, loopAt, callback) {
-		let sound = this.tracks[src];
-		let source = this.context.createBufferSource();
+	const playSound = (src, startAt, loopAt, callback) => {
+		const sound = tracks[src];
+		const source = context.createBufferSource();
 
 		source.buffer = sound;
-		if(callback) { source.onended = callback; }
-		let gainNode = this.context.createGain();
+		if (callback) source.onended = callback;
+		let gainNode = context.createGain();
 		gainNode.gain.value = 1;
 
 		source.connect(gainNode);
-		gainNode.connect(this.context.destination);
+		gainNode.connect(context.destination);
 
-		if(loopAt) {
+		if (loopAt) {
 			source.loopStart = loopAt % sound.duration;
 			source.loopEnd = sound.duration;
 			source.loop = !!loopAt;
 		}
 
-		source.start(this.context.currentTime + 0.05, startAt || 0); // first param is "time before playing" (in seconds)
+		source.start(context.currentTime + 0.05, startAt || 0); // first param is "time before playing" (in seconds)
 
 		return {
 			gainNode: gainNode
 		}
-	}
+	};
 
-	/**
-	 * Method that is called once per iteration of the main game loop.
-	 * Renders map (and, in the future, Entity objects with sprite components).
-	 * @param  {DOMHighResTimeStamp} timestamp - Current time in milliseconds.
-	 */
-	run(timestamp) {
-		this.lastUpdate = this.lastUpdate || timestamp;
+	return system
 
-		if(this.processing) return
-
-		let deltaTime = timestamp - this.lastUpdate;
-		if(this.maxUpdateRate && deltaTime < this.maxUpdateRate) return
-
-		if(this.bgmPlay) {
-			this.bgmPlay = false;
-			this[_playSound]('bgm', 0, this.bgmLoopTarget);
-		}
-
-		let soundEntities = this.getEntities('sound');
-		for(let soundEntity of soundEntities) {
-			let c = soundEntity.getComponent('sound');
-			let state = soundEntity.getComponent('state');
-
-			// Sound conditions
-			if(soundEntity.hasComponent('being')) {
-				let type = soundEntity.getComponent('being').type;
-				if(type === 'Player' && state.groundHit) {
-					c.src = 'sfx/sfx1.wav';
-					c.play = true;
-				}
-			}
-
-			// Determine distance from soundEntity to cameraCenter
-			let distanceToCamCenter = 0;
-			let radius = 0;
-			let cameraEntities = this.getEntities('camera');
-			for(let cameraEntity of cameraEntities) {
-				let cam = cameraEntity.getComponent('camera');
-				let a = (c.x - cam.mapCenterX);
-				let b = (c.y - cam.mapCenterY);
-				let currentDist = Math.sqrt((a*a) + (b*b));
-				let currentRad = Math.min(cam.mapHalfWidth, cam.mapHalfHeight);
-
-				distanceToCamCenter = !distanceToCamCenter ?
-					currentDist :
-					Math.min(distanceToCamCenter, currentDist);
-
-				radius = !radius ?
-					currentRad :
-					Math.min(radius, currentRad);
-			}
-
-			// Play
-			if(c.play && c.src) {
-				c.gainNode = this[_playSound](c.src, 0, 0).gainNode;
-				c.play = false;
-			}
-
-			// Adjust the sound gain depending on the volume setting and the sound distance...
-			if(c.gainNode) {
-				if(distanceToCamCenter <= radius) {
-					c.gainNode.gain.value = c.volume;
-				} else if(distanceToCamCenter - radius >= radius * 2) {
-					c.gainNode.gain.value = 0;
-				} else {
-					let calc = ((distanceToCamCenter - radius) / (radius * 2)) * c.volume;
-					c.gainNode.gain.value = calc;
-				}
-			}
-
-		}
-
-		this.lastUpdate = timestamp;
-	}
-}
-
-/**
- * ExampleRenderSystem module.
- * @module ExampleRenderSystem
- */
-
-/** Class representing a particular type of System used for Rendering. Not intended to be part of final game engine.
- * @extends System
- */
-class ExampleRenderSystem extends System {
-
-	/**
-	 * Create a System used for Rendering.
-	 * @param {TiledMap} map - The loaded map.
-	 * @param {EntityFactory} entityFactory - Instance of an EntityFactory. Used when calling addEntity() method.
-	 */
-	constructor(map) {
-		super();
-		this.maxFramerate = 60/1000;
-		this.lastUpdate = 0;
-		this.canvas = document.getElementById('game');
-		this.context = this.canvas && this.canvas.getContext('2d');
-
-		this.context.mozImageSmoothingEnabled = false;
-		this.context.msImageSmoothingEnabled = false;
-		this.context.imageSmoothingEnabled = false;
-
-		this.map = map;
-		this.images = {};
-		this.frames = [
-			{
-				img: 'img/monster.png',
-				x: 0,
-				y: 0,
-				width: 14,
-				height: 26
-			}, {
-				img: 'img/tankSheet.png',
-				x: 0,
-				y: 0,
-				width: 26,
-				height: 18
-			}, {
-				img: 'img/tankSheet.png',
-				x: 26,
-				y: 0,
-				width: 26,
-				height: 18
-			}, {
-				img: 'img/tankSheet.png',
-				x: 52,
-				y: 0,
-				width: 26,
-				height: 18
-			}, {
-				img: 'img/tankSheet.png',
-				x: 78,
-				y: 0,
-				width: 26,
-				height: 18
-			}
-		];
-	}
-
-	/**
-	 * Gets subset info (helps GameEngine with caching).
-	 * @returns {Object}  Plain object used as an associative array. It contains functions which check if a given entity meets criteria.
-	 */
-	getRequiredSubsets() {
-		return {
-			camera: function(entity) {
-				return entity.hasComponent('camera')
-			},
-			sprite: function(entity) {
-				return entity.hasComponent('sprite')
-			},
-			player: function(entity) {
-				return entity.hasComponent('being') && entity.getComponent('being').type === 'Player'
-			}
-		}
-	}
-
-	/**
-	 * @returns {array}  Array of path strings or plain objects with a "path" and "reviver" function (for JSON).
-	 */
-	getAssetPaths() {
-		return [
-			'img/monster.png',
-			'img/tankSheet.png'
-		]
-	}
-
-	/**
-	 * Event handler function - Store downloaded assets.
-	 * @param {Object} assets - Plain object that works as an associative array. Each item key is a path from "getAssetPaths()".
-	 */
-	onAssetsLoaded(assets) {
-		let images = assets; // All assets requested are images...so this is simple
-
-		this.images = images;
-		this.flippedImages = {};
-
-		// Images must be flipped and stored in flippedImages under same key
-		for(let key in images) {
-			let canvas = document.createElement('canvas');
-			let ctx = canvas.getContext('2d');
-			let image = images[key];
-
-			canvas.width = image.width;
-			canvas.height = image.height;
-
-			ctx.scale(-1, 1); // flip
-			ctx.drawImage(image, (-1 * canvas.width), 0); // draw flipped
-
-			this.flippedImages[key] = canvas;
-		}
-
-		this.addEntity('Camera', {
-			x: 0,
-			y: 0,
-			width: this.canvas.width,
-			height: this.canvas.height,
-			mapX: 300,
-			mapY: 820,
-			mapWidth: parseInt(this.canvas.width / 8),
-			mapHeight: parseInt(this.canvas.height / 8),
-			following: null
-		});
-		/*
-		this.addEntity('Camera', {
-			x: this.canvas.width / 2,
-			y: 0,
-			width: this.canvas.width / 2,
-			height: this.canvas.height,
-			mapX: 100,
-			mapY: 920,
-			mapWidth: this.canvas.width / 2,
-			mapHeight: this.canvas.height / 2
+		.addEventListener('load', async ({ assetFetcher }) => {
+			assetFetcher.queueAsset('sfx/sfx1.wav');
 		})
-		*/
-		super.onAssetsLoaded();
-	}
 
-	/**
-	 * Method that is called once per iteration of the main game loop.
-	 * Renders map (and, in the future, Entity objects with sprite components).
-	 * @param  {DOMHighResTimeStamp} timestamp - Current time in milliseconds.
-	 */
-	run(timestamp) {
+		.addEventListener('loaded', async ({ assets }) => {
+			const asset = assets.get('sfx/sfx1.wav');
+			tracks['sfx/sfx1.wav'] = await context.decodeAudioData(asset);
+		})
 
-		// Limit drawing operations to 60 times per second
-		if(this.maxFramerate && timestamp - this.lastUpdate < this.maxFramerate) return
+		.addEventListener('mounted', ({ entities }) => {
+			indexComponents$2(entities, ['camera', 'sound']);
+		})
 
-		this.context.clearRect(0, 0, this.canvas.width, this.canvas.height);
+		.addEventListener('update', ({ entities }) => {
 
-		let players = this.getEntities('player');
-
-		// Get each camera
-		let cameraEntities = this.getEntities('camera');
-		for(let cameraEntity of cameraEntities) {
-			let c = cameraEntity.getComponent('camera');
-
-			// Set up drawing layers
-			let layers = {
-				Background: { sprites: [] },
-				Platforms:  { sprites: [] },
-				Player:     { sprites: [] }
-			};
-
-			// Force camera to match followed entity
-			if(!c.following && players && players[0]) { c.following = players[0]; }
-			if(c.following) {
-				let sprite = c.following.getComponent('sprite');
-				let frame = this.frames[sprite.frame];
-				c.mapX = sprite.x + (frame.width / 2) - (c.mapWidth / 2);
-
-				let threshold = (c.mapHeight / 4);
-				if(sprite.y < c.mapY + threshold) {
-					c.mapY = sprite.y - threshold;
-				} else if((sprite.y + sprite.height) > c.mapY + c.mapHeight - threshold) {
-					c.mapY = sprite.y + sprite.height - (c.mapHeight - threshold);
-				}
+			// Start the background music
+			if (bgmPlay) {
+				bgmPlay = false;
+				playSound('bgm', 0, bgmLoopTarget);
 			}
 
-			// Get entities with a sprite component and add to the appropriate layer for rendering
-			let entities = this.getEntities('sprite');
-			for(let entity of entities) {
-				let sprite = entity.getComponent('sprite');
-				let frame = this.frames[sprite.frame];
-				let img = !sprite.flipped ? this.images[frame.img] : this.flippedImages[frame.img];
+			const soundComponents = entities.getIndexed('sound');
+			for (const c of soundComponents) {
+				const soundEntity = c.getParentEntity();
+				const state = soundEntity.getComponent('state');
 
-				sprite.width = frame.width;
-				sprite.height = frame.height;
-
-				let obj = {
-					img: img,
-					x: sprite.x - c.mapX,
-					y: sprite.y - c.mapY,
-					width: frame.width,
-					height: frame.height,
-					sx: frame.x,
-					sy: frame.y
-				};
-
-				if(
-					obj.x + obj.width > 0 && obj.x < c.mapWidth &&
-					obj.y + obj.height > 0 && obj.y < c.mapHeight
-				) {
-					layers[sprite.layer].sprites.push(obj);
-				}
-			}
-
-			// Draw each map layer (include all sprites for that layer)
-			for(let layerKey in layers) {
-				let layer = layers[layerKey];
-
-				let mapX = Math.round(c.mapX);
-				let mapY = Math.round(c.mapY);
-				let mapWidth = parseInt(c.mapWidth);
-				let mapHeight = parseInt(c.mapHeight);
-				let x = parseInt(c.x);
-				let y = parseInt(c.y);
-				let width = parseInt(c.width);
-				let height = parseInt(c.height);
-
-				this.map.render(this.context, layerKey, timestamp, mapX, mapY, mapWidth, mapHeight, x, y, width, height);
-
-				// Draw each sprite to a temporary canvas
-				if(layer.sprites.length > 0) {
-					let tempCanvas = document.createElement('canvas');
-					tempCanvas.width = mapWidth;
-					tempCanvas.height = mapHeight;
-					let tempCtx = tempCanvas.getContext('2d');
-					for(let sprite of layer.sprites) {
-						tempCtx.drawImage(sprite.img, parseInt(sprite.sx), parseInt(sprite.sy), parseInt(sprite.width), parseInt(sprite.height), Math.round(sprite.x), Math.round(sprite.y), parseInt(sprite.width), parseInt(sprite.height));
+				// Sound conditions
+				if (soundEntity.hasComponent('being')) {
+					const type = soundEntity.getComponent('being').type;
+					if (type === 'Player' && state.groundHit) {
+						c.src = 'sfx/sfx1.wav';
+						c.play = true;
 					}
-
-					// Draw the temporary canvas to the main canvas (position and fit to camera bounds)
-					this.context.drawImage(tempCanvas, 0, 0, mapWidth, mapHeight, x, y, width, height);
 				}
+
+				// Determine distance from soundEntity to cameraCenter
+				let distanceToCamCenter = 0;
+				let radius = 0;
+				const cameraComponents = entities.getIndexed('camera');
+				for (const cam of cameraComponents) {
+					const a = (c.x - cam.mapCenterX);
+					const b = (c.y - cam.mapCenterY);
+					const currentDist = Math.sqrt((a*a) + (b*b));
+					const currentRad = Math.min(cam.mapHalfWidth, cam.mapHalfHeight);
+
+					distanceToCamCenter = !distanceToCamCenter ?
+						currentDist :
+						Math.min(distanceToCamCenter, currentDist);
+
+					radius = !radius ?
+						currentRad :
+						Math.min(radius, currentRad);
+				}
+
+				// Play
+				if (c.play && c.src) {
+					c.gainNode = playSound(c.src, 0, 0).gainNode;
+					c.play = false;
+				}
+
+				// Adjust the sound gain depending on the volume setting and the sound distance...
+				if (c.gainNode) {
+					if (distanceToCamCenter <= radius) {
+						c.gainNode.gain.value = c.volume;
+					} else if (distanceToCamCenter - radius >= radius * 2) {
+						c.gainNode.gain.value = 0;
+					} else {
+						const calc = ((distanceToCamCenter - radius) / (radius * 2)) * c.volume;
+						c.gainNode.gain.value = calc;
+					}
+				}
+
 			}
-		}
+		})
+};
 
-		this.lastUpdate = timestamp;
+// TODO: Move this to Game?
+const indexComponents$3 = (entities, compNames = []) =>
+	compNames.forEach(compName =>
+		entities.setIndex(compName, entity => entity.getComponent(compName))
+	);
 
-	}
-}
+var createSpawnSystem = async (systemName, { system, entityFactory }) => system
+	.addEventListener('mounted', ({ entities }) => {
+		indexComponents$3(entities, ['spawner', 'spawned']);
+	})
+	.addEventListener('update', ({ entities, currentTarget }) => {
 
-/**
- * Entity module.
- * @module Entity
- */
+		// Get all "spawner" components
+		const spawnerComponents = entities.getIndexed('spawner');
 
-/** Class that represents an Entity (the "E" in the ECS design pattern). */
-class Entity {
+		// Get all "spawned" components
+		const spawnedComponents = entities.getIndexed('spawned');
 
-	/**
-	 * Create an Entity.
-	 * @param  {function} compCallback - Function to call after a component is added/removed.
-	 */
-	constructor(compCallback) {
-		this.compCallback = compCallback;
-		this.components = {};
-	}
+		// Filter down to only the spawners that are ready to spawn (have no entities left)
+		const readySpawnerComponents = spawnerComponents.reject(spawnerComponent =>
+			spawnedComponents.some(spawnedComponent =>
+				spawnedComponent.spawnerSource === spawnerComponent.name
+			)
+		);
 
-	/**
-	 * Check if the given component exists for this Entity.
-	 * @param  {string} compName - Name of component.
-	 * @returns {boolean}  true if the given component exists for this Entity.
-	 */
-	hasComponent(compName) {
-		return this.components[compName] !== undefined
-	}
+		// Create a new spawned entity for each "ready" spawner
+		readySpawnerComponents.forEach(spawnerComp =>
+			currentTarget.addEntity(entityFactory.create(spawnerComp.entityType, {
+				x: spawnerComp.x,
+				y: spawnerComp.y,
+				width: 0,
+				height: 0,
+				spawnerSource: spawnerComp.name
+			}))
+		);
+	});
 
-	/**
-	 * Gets the component object for this Entity under the given name.
-	 * @param  {string} compName - Name of component.
-	 * @returns {Object|null}  Returns the component object under the given name.
-	 */
-	getComponent(compName) {
-		return this.components[compName]
-	}
+var createUpdateSystem = async (systemName, { system, inputManager }) => system
+	.addEventListener('mounted', ({ entities }) => {
+		entities.setIndex('player', (entity) => {
+			const comp = entity.getComponent('being');
+			return comp && comp.type === 'Player' ? entity : undefined
+		});
+	})
 
-	/**
-	 * Adds a component object for this Entity under the given name.
-	 * @param  {string} compName - Name of component.
-	 * @param  {Object=} component - Plain-data Object.
-	 * @returns {Object|null}  Returns the component object added under the given name.
-	 */
-	addComponent(compName, component) {
-		if(!compName) { return }
+	.addEventListener('update', ({ entities }) => {
+		entities.getIndexed('player').forEach((playerEntity) => {
+			const c = playerEntity.getComponent('physicsBody');
+			const state = playerEntity.getComponent('state');
+			const sprite = playerEntity.getComponent('sprite');
 
-		this.components[compName] = component;
+			if (inputManager.leftButton.held) {
+				c.accX = -0.2;
+				state.state = 'driving';
+				sprite.flipped = true;
+			} else if (inputManager.rightButton.held) {
+				c.accX = 0.2;
+				state.state = 'driving';
+				sprite.flipped = false;
+			} else {
+				c.accX = 0;
+				if (c.spdX === 0) state.state = 'idle';
+			}
 
-		if(this.compCallback) {
-			this.compCallback(this);
-		}
+			if (state.state === 'driving') {
+				sprite.frame = (parseInt(c.x / 6) % 4) + 1;
+			}
 
-		return this.components[compName]
-	}
+			if (inputManager.jumpButton.pressed && state.grounded) { c.spdY = -100; }
+		});
+	});
 
-	/**
-	 * Removes a component object from this Entity under the given name (if it exists).
-	 * @param  {string} compName - Name of component.
-	 */
-	removeComponent(compName) {
-		delete this.components[compName];
+var buildSystemFactory = (systemFactory) => systemFactory
+	.set('physics', createPhysicsSystem)
+	.set('render', createRenderSystem)
+	.set('sound', createSoundSystem)
+	.set('spawn', createSpawnSystem)
+	.set('update', createUpdateSystem);
 
-		if(this.compCallback) {
-			this.compCallback(this);
-		}
-	}
-}
+var createCamera = (componentType, { component, data } = {}) =>
+	component.decorate({
+		x: data.x,
+		y: data.y,
+		width: data.width,
+		height: data.height,
+		mapX: data.mapX,
+		mapY: data.mapY,
+		mapWidth: data.mapWidth,
+		mapHeight: data.mapHeight,
+		get mapHalfWidth() { return this.mapWidth / 2 },
+		get mapHalfHeight() { return this.mapHeight / 2 },
+		get mapCenterX() { return this.mapX + this.mapHalfWidth },
+		get mapCenterY() { return this.mapY + this.mapHalfHeight },
+		following: data.following
+	});
 
-/**
- * EntityFactory module.
- * @module EntityFactory
- */
+var createStaticPhysicsBody = (componentType, { component, data: {
+	x,
+	y,
+	width,
+	height
+} } = {}) =>
+	component.decorate({
+		x: x,
+		y: y,
+		width: width,
+		height: height,
+		halfWidth: width / 2,
+		halfHeight: height / 2,
+		midPointX: x + (width / 2),
+		midPointY: y + (height / 2)
+	});
 
-/**
- * Class that acts as an interface/abstract class for an EntityFactory. Please avoid instantiating directly.
- * @interface
- */
-class EntityFactory {
+var createSpawner = (componentType, { component, data: { type = 'Monster', name, x, y } } = {}) =>
+	component.decorate({ entityType: type, name, x, y, });
 
-	/**
-	 * Create an EntityFactory.
-	 */
-	constructor() {
-		if (this.constructor === EntityFactory) {
-			throw new Error('Can\'t instantiate EntityFactory! (abstract class)')
-		}
-	}
-
-	/**
-	 * Create an Entity instance of the given type.
-	 * @param {string} entityType - Type of entity (key used to determine which constructor function to use to build entity).
-	 * @param {Object} data - Plain object that represents an entity's components.
-	 * @param  {function} compCallback - Function to call after a component is added/removed or other changes are made that need to be observed.
-	 * @returns  {Entity}  A single Entity instance.
-	 */
-	create(entityType, data, compCallback) {
-		if(typeof data !== 'object' || data.constructor !== Object) {
-			throw new Error('Can\'t must use plain objects for data')
-		}
-		return new Entity(compCallback)
-	}
-}
+var createSpawned = (componentType, { component, data: { spawnerSource } } = {}) =>
+	component.decorate({ spawnerSource });
 
 const _x = Symbol('_x');
 const _y = Symbol('_y');
 const _width = Symbol('_width');
 const _height = Symbol('_height');
 
-class SpriteComponent {
-	constructor(x, y, width, height, frame, layer) {
-		this.x = x;
-		this.y = y;
-		this.width = width;
-		this.height = height;
-		this.frame = frame;
-		this.layer = layer;
-		this.flipped = false;
-	}
-	get x() {
-		return this[_x]
-	}
-	set x(val) {
-		this[_x] = val;
-		this.midPointX = val + this.halfWidth;
-	}
+var createSprite = (componentType, { component, data: {
+	x = 0,
+	y = 0,
+	width = 0,
+	height = 0,
+	frame,
+	layer
+} } = { data: {} }) => {
+	const obj = {
+		get x() {
+			return this[_x]
+		},
+		set x(val) {
+			this[_x] = val;
+			this.midPointX = val + this.halfWidth;
+		},
 
-	get y() {
-		return this[_y]
-	}
-	set y(val) {
-		this[_y] = val;
-		this.midPointY = val + this.halfHeight;
-	}
+		get y() {
+			return this[_y]
+		},
+		set y(val) {
+			this[_y] = val;
+			this.midPointY = val + this.halfHeight;
+		},
 
-	get width() {
-		return this[_width]
-	}
-	set width(val) {
-		this[_width] = val;
-		this.halfWidth = val / 2;
-		this.midPointX = this.x + this.halfWidth;
-	}
+		get width() {
+			return this[_width]
+		},
+		set width(val) {
+			this[_width] = val;
+			this.halfWidth = val / 2;
+			this.midPointX = this.x + this.halfWidth;
+		},
 
-	get height() {
-		return this[_height]
-	}
-	set height(val) {
-		this[_height] = val;
-		this.halfHeight = val / 2;
-		this.midPointY = this.y + this.halfHeight;
-	}
-}
+		get height() {
+			return this[_height]
+		},
+		set height(val) {
+			this[_height] = val;
+			this.halfHeight = val / 2;
+			this.midPointY = this.y + this.halfHeight;
+		}
+	};
+	obj.x = x;
+	obj.y = y;
+	obj.width = width;
+	obj.height = height;
+	
+	Object.assign(obj, {
+		frame,
+		layer,
+		flipped: false,
+	});
+	return component.decorate(obj)
+};
 
 const _entity = Symbol('_x');
 const _spriteComp = Symbol('_x');
 
-class SpritePhysicsComponent {
-	constructor(entity) {
-		this[_entity] = entity;
-		this.accX = 0;
-		this.accY = 0;
-		this.spdX = 0;
-		this.spdY = 0;
-	}
-	get [_spriteComp]() { return this[_entity].getComponent('sprite') }
-	get x() { return this[_spriteComp].x }
-	set x(val) { this[_spriteComp].x = val; }
-	get y() { return this[_spriteComp].y }
-	set y(val) { this[_spriteComp].y = val; }
-	get width() { return this[_spriteComp].width }
-	set width(val) { this[_spriteComp].width = val; }
-	get height() { return this[_spriteComp].height }
-	set height(val) { this[_spriteComp].height = val; }
-	get midPointX() { return this[_spriteComp].midPointX }
-	set midPointX(val) { this[_spriteComp].midPointX = val; }
-	get midPointY() { return this[_spriteComp].midPointY }
-	set midPointY(val) { this[_spriteComp].midPointY = val; }
-	get halfWidth() { return this[_spriteComp].halfWidth }
-	set halfWidth(val) { this[_spriteComp].halfWidth = val; }
-	get halfHeight() { return this[_spriteComp].halfHeight }
-	set halfHeight(val) { this[_spriteComp].halfHeight = val; }
-}
+var createSpritePhysics = (componentType, { component, data: { entity } } = {}) =>
+	component.decorate({
+		[_entity]: entity,
+		accX: 0,
+		accY: 0,
+		spdX: 0,
+		spdY: 0,
+		get [_spriteComp]() { return this[_entity].getComponent('sprite') },
+		get x() { return this[_spriteComp].x },
+		set x(val) { this[_spriteComp].x = val; },
+		get y() { return this[_spriteComp].y },
+		set y(val) { this[_spriteComp].y = val; },
+		get width() { return this[_spriteComp].width },
+		set width(val) { this[_spriteComp].width = val; },
+		get height() { return this[_spriteComp].height },
+		set height(val) { this[_spriteComp].height = val; },
+		get midPointX() { return this[_spriteComp].midPointX },
+		set midPointX(val) { this[_spriteComp].midPointX = val; },
+		get midPointY() { return this[_spriteComp].midPointY },
+		set midPointY(val) { this[_spriteComp].midPointY = val; },
+		get halfWidth() { return this[_spriteComp].halfWidth },
+		set halfWidth(val) { this[_spriteComp].halfWidth = val; },
+		get halfHeight() { return this[_spriteComp].halfHeight },
+		set halfHeight(val) { this[_spriteComp].halfHeight = val; }
+	});
 
 const _entity$1 = Symbol('_entity');
 const _spriteComp$1 = Symbol('_spriteComp');
@@ -2005,159 +2436,174 @@ const _y$1 = Symbol('_y');
 const _followSprite = Symbol('_followSprite');
 const gainNodeMap = new WeakMap();
 
-class SpriteSoundComponent {
-	constructor(src, entity) {
-		this[_entity$1] = entity;
-		this.src = src;
-		this.play = false;
-		this.volume = 1;
-		this[_followSprite] = true;
-	}
-	get [_spriteComp$1]() { return this[_entity$1].getComponent('sprite') }
-	get followSprite() { return this[_followSprite] }
-	set followSprite(val) {
-		if(this[_followSprite] && !val) {
-			this.x = this[_spriteComp$1].midPointX;
-			this.y = this[_spriteComp$1].midPointY;
+var createSpriteSound = (componentType, { component, data } = {}) =>
+	component.decorate({
+		[_entity$1]: data.entity,
+		src: data.src,
+		play: false,
+		volume: 1,
+		[_followSprite]: true,
+		get [_spriteComp$1]() { return this[_entity$1].getComponent('sprite') },
+		get followSprite() { return this[_followSprite] },
+		set followSprite(val) {
+			if(this[_followSprite] && !val) {
+				this.x = this[_spriteComp$1].midPointX;
+				this.y = this[_spriteComp$1].midPointY;
+			}
+			this[_followSprite] = val;
+		},
+		get x() { return this.followSprite ? this[_spriteComp$1].midPointX : this[_x$1] },
+		set x(val) { this[_x$1] = val; },
+		get y() { return this.followSprite ? this[_spriteComp$1].midPointY : this[_y$1] },
+		set y(val) { this[_y$1] = val; },
+		set gainNode(val) {
+			gainNodeMap.set(this, val);
+		},
+		get gainNode() {
+			return gainNodeMap.get(this)
 		}
-		this[_followSprite] = val;
-	}
-	get x() { return this.followSprite ? this[_spriteComp$1].midPointX : this[_x$1] }
-	set x(val) { this[_x$1] = val; }
-	get y() { return this.followSprite ? this[_spriteComp$1].midPointY : this[_y$1] }
-	set y(val) { this[_y$1] = val; }
-	set gainNode(val) {
-		gainNodeMap.set(this, val);
-	}
-	get gainNode() {
-		return gainNodeMap.get(this)
-	}
-}
+	});
 
-const _state = Symbol('_symbol');
+var createBeing = (componentType, { component, data: { type } } = {}) =>
+	component.decorate({ type });
 
-class StateComponent {
-	constructor(initialState) {
-		this[_state] = null;
-		this.lastState = null;
-		this.lastUpdate = null;
-		this.grounded = false;
-		this.groundHit = false;
-		this.state = initialState;
-	}
-	get state() {
-		return this[_state]
-	}
-	set state(val) {
-		this.lastState = this[_state];
-		this[_state] = val;
-		this.lastUpdate = window.performance.now();
-	}
-}
+const _state = Symbol('_state');
 
-/**
- * ExampleEntityFactory module.
- * @module ExampleEntityFactory
- */
-
-// Import component classes
-/** Class representing a particular implementation of an EntityFactory. Not intended to be part of final game engine.
- * @extends EntityFactory
- */
-class ExampleEntityFactory extends EntityFactory {
-
-	/**
-	 * Create an Entity instance of the given type.
-	 * @param {string} entityType - Type of entity (key used to determine which constructor function to use to build entity).
-	 * @param {Object} data - Plain object that represents an entity's components.
-	 * @param {function} compCallback - Function to call after a component is added/removed or other changes are made that need to be observed.
-	 * @returns {Entity}  A single Entity instance.
-	 */
-	create(entityType, data, compCallback) {
-		let entity = super.create(entityType, data, compCallback);
-		switch(entityType) {
-			case 'Camera':
-				entity.addComponent('camera', {
-					x: data.x,
-					y: data.y,
-					width: data.width,
-					height: data.height,
-					mapX: data.mapX,
-					mapY: data.mapY,
-					mapWidth: data.mapWidth,
-					mapHeight: data.mapHeight,
-					get mapHalfWidth() { return this.mapWidth / 2 },
-					get mapHalfHeight() { return this.mapHeight / 2 },
-					get mapCenterX() { return this.mapX + this.mapHalfWidth },
-					get mapCenterY() { return this.mapY + this.mapHalfHeight },
-					following: data.following
-				});
-				break
-			case 'Collision':
-				entity.addComponent('staticPhysicsBody', {
-					x: data.x,
-					y: data.y,
-					width: data.width,
-					height: data.height,
-					halfWidth: data.width / 2,
-					halfHeight: data.height / 2,
-					midPointX: data.x + (data.width / 2),
-					midPointY: data.y + (data.height / 2)
-				});
-				break
-			case 'PlayerSpawner':
-				entity.addComponent('spawner', {
-					entityType: 'Player',
-					x: data.x,
-					y: data.y,
-					name: data.name
-				});
-				break
-			case 'EntitySpawner':
-				entity.addComponent('spawner', {
-					entityType: 'Monster',
-					x: data.x,
-					y: data.y,
-					name: data.name
-				});
-				break
-			case 'Player':
-			case 'Monster':
-				entity.addComponent('spawned', {
-					spawnerSource: data.spawnerSource
-				});
-				entity.addComponent('being', {
-					type: entityType
-				});
-				entity.addComponent('state', new StateComponent('idle'));
-				entity.addComponent('sprite', new SpriteComponent(
-					data.x,
-					data.y,
-					data.width,
-					data.height,
-					(entityType === 'Player' ? 1 : 0),
-					(entityType === 'Player' ? 'Player' : 'Platforms')
-				));
-				entity.addComponent('physicsBody', new SpritePhysicsComponent(entity));
-				entity.addComponent('sound', new SpriteSoundComponent(null, entity));
+var createState = (componentType, { component, data: { initialState } } = {}) =>
+	component.decorate({
+		[_state]: initialState,
+		lastState: null,
+		lastUpdate: null,
+		grounded: false,
+		groundHit: false,
+		get state() {
+			return this[_state]
+		},
+		set state(val) {
+			this.lastState = this[_state];
+			this[_state] = val;
+			this.lastUpdate = window.performance.now();
 		}
-		return entity
-	}
-}
+	});
 
-// Game's main entry point
-class ExampleGameEngine extends GameEngine {
-	addSystems() {
-		this.addSystem('spawn', new ExampleSpawnerSystem());
-		this.addSystem('update', new ExampleUpdateSystem());
-		this.addSystem('physics', new ExamplePhysicsSystem());
-		this.addSystem('render', new ExampleRenderSystem(this.map));
-		this.addSystem('sound', new ExampleSoundSystem(this.map));
-		super.addSystems();
-	}
-}
+var buildComponentFactory = (componentFactory) => componentFactory
+	.set('camera', createCamera)
+	.set('staticPhysicsBody', createStaticPhysicsBody)
+	.set('spawner', createSpawner)
+	.set('spawned', createSpawned)
+	.set('sprite', createSprite)
+	.set('spritePhysics', createSpritePhysics)
+	.set('spriteSound', createSpriteSound)
+	.set('being', createBeing)
+	.set('state', createState);
 
-const game = new ExampleGameEngine('json/level3.json', new ExampleEntityFactory());
-game.run();
+var createCamera$1 = (entityType, { componentFactory, entity, data } = {}) =>
+	entity.setComponent('camera', componentFactory.create('camera', data));
+
+var createCollision = (entityType, { componentFactory, entity, data } = {}) =>
+	entity.setComponent('staticPhysicsBody', componentFactory.create('staticPhysicsBody', data));
+
+var createPlayerSpawner = (entityType, { entity, componentFactory, data }) => {
+	data.type = 'Player';
+	return entity.setComponent('spawner', componentFactory.create('spawner', data))
+};
+
+var createEntitySpawner = (entityType, { entity, componentFactory, data }) => {
+	data.type = 'Monster';
+	return entity.setComponent('spawner', componentFactory.create('spawner', data))
+};
+
+var createPlayerOrMonster = (entityType, { entity, componentFactory, data: { spawnerSource, x, y, width, height } } = {}) =>
+	entity
+		.setComponent('spawned', componentFactory.create('spawned', { spawnerSource }))
+		.setComponent('state', componentFactory.create('state', { initialState: 'idle' }))
+		.setComponent('being', componentFactory.create('being', { type: entityType }))
+		.setComponent('sprite', componentFactory.create('sprite', {
+			x, y, width, height,
+			frame: (entityType === 'Player' ? 1 : 0),
+			layer: (entityType === 'Player' ? 'Player' : 'Platforms'),
+		}))
+		.setComponent('physicsBody', componentFactory.create('spritePhysics', { entity }))
+		.setComponent('sound', componentFactory.create('spriteSound', { src: null, entity }));
+
+var buildEntityFactory = (entityFactory) => entityFactory
+	.use((entityName, obj) => {
+		buildComponentFactory(obj.componentFactory);
+		return obj
+	})
+	.set('Camera', createCamera$1)
+	.set('Collision', createCollision)
+	.set('PlayerSpawner', createPlayerSpawner)
+	.set('EntitySpawner', createEntitySpawner)
+	.set('Player', createPlayerOrMonster)
+	.set('Monster', createPlayerOrMonster);
+
+var createLevel1 = async (sceneName, { scene, systemFactory, entityFactory, tiledMap }) => scene
+	.setSystem('spawn', await systemFactory.create('spawn'))
+	.setSystem('update', await systemFactory.create('update'))
+	.setSystem('physics', await systemFactory.create('physics'))
+	.setSystem('render', await systemFactory.create('render'))
+	.setSystem('sound', await systemFactory.create('sound'))
+
+	.addEventListener('load', async ({ assetFetcher }) => {
+
+		// Load the necessary resources for the TiledMap instance
+		assetFetcher.queueAssets(tiledMap.getResourcePaths());
+
+	})
+	.addEventListener('loaded', async ({ currentTarget, assets }) => {
+
+		// Add the resources to the TiledMap instance
+		tiledMap.setResources(assets);
+
+		// Filter out the objects that we don't have a constructor for
+		const tiledObjects = tiledMap.getObjects().filter(
+			object => entityFactory.has(object.type)
+		);
+
+		// Add entities from tiledMap instance
+		currentTarget.addEntities(tiledObjects.map(
+			object => entityFactory.create(object.type, object)
+		));
+	});
+
+const assetFetcher = namespace.createAssetFetcher();
+
+var createSceneFactory = () => namespace.createSceneFactory()
+	.use(async (sceneName, sceneData) => {
+		const tiledData = await assetFetcher.fetch(`json/${sceneName}.json`);
+
+		// Create TiledMap instance
+		const tiledMap = namespace.createTiledMap()
+			.setBasePath((new URL('/', window.location.href)).href)
+			.decorate(tiledData);
+
+		buildEntityFactory(sceneData.entityFactory);
+
+		sceneData.systemFactory.use(async (systemName, systemData) => {
+			systemData.inputManager = namespace.createInputManager();
+			systemData.tiledMap = tiledMap;
+			systemData.entityFactory = sceneData.entityFactory;
+			return systemData
+		});
+
+		buildSystemFactory(sceneData.systemFactory);
+
+		sceneData.tiledMap = tiledMap;
+
+		return sceneData
+	})
+	.set('level-1', createLevel1);
+
+const sceneFactory = createSceneFactory();(async () => {
+	const game = namespace.createGame()
+		.setScene('level-1', await sceneFactory.create('level-1'))
+		.changeScene('level-1');
+	
+	await game.load(namespace.createAssetFetcher());
+	game.run();
+})();
+
+window.game = game;
 
 }());
