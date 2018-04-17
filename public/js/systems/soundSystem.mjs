@@ -1,9 +1,9 @@
 // TimeOffset class
 const _time = Symbol('_time')
 class TimeOffset {
-	constructor(timeStr, millisecondsMode) {
+	constructor(timeStr, millisecondsMode = false) {
 		this[_time] = timeStr
-		this.msMode = millisecondsMode || false
+		this.msMode = millisecondsMode
 	}
 	valueOf() {
 		let val = 0

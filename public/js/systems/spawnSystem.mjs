@@ -17,9 +17,9 @@ export default async (systemName, { system, entityFactory }) => system
 		const spawnedComponents = entities.getIndexed('spawned')
 
 		// Filter down to only the spawners that are ready to spawn (have no entities left)
-		const readySpawnerComponents = spawnerComponents.reject(spawnerComponent =>
-			spawnedComponents.some(spawnedComponent =>
-				spawnedComponent.spawnerSource === spawnerComponent.name
+		const readySpawnerComponents = spawnerComponents.filter(spawnerComponent =>
+			spawnedComponents.every(spawnedComponent =>
+				spawnedComponent.spawnerSource !== spawnerComponent.name
 			)
 		)
 
