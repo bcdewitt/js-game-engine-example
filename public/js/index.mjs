@@ -7,9 +7,9 @@ const sceneFactory = createSceneFactory()
 	const game = Game.createGame()
 		.setScene('level-1', await sceneFactory.create('level-1'))
 		.changeScene('level-1')
-	
+
 	await game.load(Game.createAssetFetcher())
 	game.run()
-})()
 
-window.game = game
+	window.game = game
+})()
