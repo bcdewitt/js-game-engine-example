@@ -4,12 +4,8 @@ import createSceneFactory from './sceneFactory.mjs'
 const sceneFactory = createSceneFactory()
 
 ;(async () => {
-	const game = Game.createGame()
+	window.game = Game.createGame()
+		.setAssetFetcher(Game.createAssetFetcher())
 		.setScene('level-1', await sceneFactory.create('level-1'))
-		.changeScene('level-1')
-
-	await game.load(Game.createAssetFetcher())
-	game.run()
-
-	window.game = game
+		.run('level-1')
 })()

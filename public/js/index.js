@@ -1,72 +1,150 @@
 (function () {
 'use strict';
 
-// TODO: JSDoc
-
+/**
+ * A class that extends Set with partial implementations of common Array
+ * methods like .map() .filter(), etc.
+ */
 class Collection extends Set {
-	map(func) {
-		const newSet = new Collection();
-		this.forEach(item => newSet.add(func(item)));
+
+	/**
+	 * The map() method creates a new Collection with the results of calling
+	 * a provided function on every element in the calling Collection.
+	 *
+	 * https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/map
+	 *
+	 * @param {function} callback - Function that produces an element of the new Collection.
+	 * @returns {Collection} - A new Collection (or subclass) with each element being the result of the callback function.
+	 */
+	map(callback) {
+		const Clazz = this.constructor; // In case Collection gets extended
+		const newSet = new Clazz();
+		this.forEach(item => newSet.add(callback(item)));
 		return newSet
 	}
 
-	filter(func) {
-		const newSet = new Collection();
-		this.forEach(item => { if (func(item)) newSet.add(item); });
+	/**
+	 * The filter() method creates a new Collection with all elements that pass the
+	 * test implemented by the provided function.
+	 *
+	 * https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/filter
+	 *
+	 * @param {function} callback - Function used to test each element of the Collection.
+	 *     Return true to keep the element, false otherwise.
+	 * @returns {Collection} - Collection (or subclass) holding filtered results.
+	 */
+	filter(callback) {
+		const Clazz = this.constructor;
+		const newSet = new Clazz();
+		this.forEach(item => { if (callback(item)) newSet.add(item); });
 		return newSet
 	}
 
-	reject(func) {
-		return this.filter(item => !func(item))
-	}
-
-	reduce(func, defaultVal) {
-		if (defaultVal === undefined && this.size === 0)
+	/**
+	 * The reduce() method applies a function against an accumulator
+	 * and each element in the Collection (from left to right) to reduce
+	 * it to a single value.
+	 *
+	 * https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/Reduce
+	 *
+	 * @param {function} callback - Function to execute on each element in the Collection.
+	 * @param {*} [initialValue] - Value to use as the first argument to the first call of the callback.
+	 *     If no initial value is supplied, the first element in the Collection will be used.
+	 *     Calling reduce() on an empty Collection without an initial value is an error.
+	 * @returns {*} - The value that results from the reduction.
+	 */
+	reduce(callback, initialValue) {
+		if (initialValue === undefined && this.size === 0)
 			throw new Error('reduce() cannot be called on an empty set')
 
 		const iterator = this.values();
-		let lastVal = defaultVal === undefined ? iterator.next().value : defaultVal;
+		let lastVal = initialValue === undefined ? iterator.next().value : initialValue;
 		for (const item of iterator) {
-			lastVal = func(lastVal, item);
+			lastVal = callback(lastVal, item);
 		}
 		return lastVal
 	}
 
-	some(func) {
+	/**
+	 * The some() method tests whether at least one element in the Collection passes
+	 * the test implemented by the provided function.
+	 *
+	 * https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/some
+	 *
+	 * @param {function} callback - Function to test for each element.
+	 * @returns {boolean} - True if the callback function returns a truthy value for any Collection element; otherwise, false.
+	 */
+	some(callback) {
 		for (const item of this) {
-			if (func(item)) return true
+			if (callback(item)) return true
 		}
 		return false
 	}
 
-	every(func) {
+	/**
+	 * The every() method tests whether all elements in the Collection pass the
+	 * test implemented by the provided function.
+	 *
+	 * https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/every
+	 *
+	 * @param {function} callback - Function to test for each element.
+	 * @returns {boolean} - True if the callback function returns a truthy value for every Collection element; otherwise, false.
+	 */
+	every(callback) {
 		for (const item of this) {
-			if (!func(item)) return false
+			if (!callback(item)) return false
 		}
 		return true
 	}
 
-	find(func) {
+	/**
+	 * The find() method returns the value of the first element in the Collection
+	 * that satisfies the provided testing function. Otherwise undefined is returned.
+	 *
+	 * https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/find
+	 *
+	 * @param {function} callback - Function to execute on each value in the Collection.
+	 * @returns {*} - A value in the Collection if an element passes the test; otherwise, undefined.
+	 */
+	find(callback) {
 		for (const item of this) {
-			if (func(item)) return item
+			if (callback(item)) return item
 		}
 		return undefined
 	}
 
-	concat(iterable) {
-		const newSet = new Collection(this); // TODO: Change to make sure we can handle subclasses
-		for (const item of iterable) {
-			newSet.add(item);
+	/**
+	 * The concat() method is used to merge two or more iterable objects.
+	 * This method does not change the existing iterables, but instead
+	 * returns a new Collection.
+	 *
+	 * https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/concat
+	 *
+	 * @param {...Iterable.<*>} - iterable to concatenate into a new Collection.
+	 * @returns {Collection} - A new Collection (or subclass) instance.
+	 */
+	concat(...iterables) {
+		const Clazz = this.constructor; // In case Collection gets extended
+		const newSet = new Clazz(this);
+		for (const iterable of iterables) {
+			for (const item of iterable) {
+				newSet.add(item);
+			}
 		}
 		return newSet
 	}
 }
 
+/**
+ * Module containing the GameEvent constructor and eventTargetMixin.
+ * @module GameEvent
+ */
+
 const _GameEvent = new WeakMap();
 let propagatingEvent = null; // Keeps track of the currently propagating event to cancel out duplicate events
 
 /**
- * Class representing an event fired by a game object.
+ * Class representing an event fired by a game object. (API based on web standards)
  */
 class GameEvent {
 	constructor(type, { bubbles } = {}) {
@@ -85,14 +163,24 @@ class GameEvent {
 		Object.defineProperty(this, 'currentTarget', { get() { return _this.currentTarget } });
 	}
 
+	/**
+	 * Prevents further propagation of the current event.
+	 * @returns {this} - Returns self for method chaining.
+	 */
 	stopPropagation() {
 		_GameEvent.get(this).propagate = false;
+		return this
 	}
 
+	/**
+	 * Prevents other listeners of the same event from being called.
+	 * @returns {this} - Returns self for method chaining.
+	 */
 	stopImmediatePropagation() {
 		const _this = _GameEvent.get(this);
 		_this.propagate = false;
 		_this.propagateImmediate = false;
+		return this
 	}
 }
 
@@ -102,7 +190,6 @@ const _eventTargetMixin = new WeakMap();
  * Event Target mixin
  *
  * This provides properties and methods used for game event handling.
- * It's not meant to be used directly.
  *
  * @mixin eventTargetMixin
  */
@@ -115,8 +202,16 @@ const eventTargetMixin = {
 		});
 	},
 
-	// TODO: DRY this up
+	/**
+	 * Dispatches an Event to the specified EventTarget, asynchronously invoking
+	 * the affected EventListeners in the appropriate order.
+	 *
+	 * @async
+	 * @param {GameEvent} e - Event to dispatch.
+	 */
 	async dispatchEventAsync(e) {
+		// TODO: DRY this up by using shared code between this and .dispatchEvent()
+
 		// Prevent duplicate events during propagation
 		if (propagatingEvent && propagatingEvent.currentTarget === this) return
 
@@ -152,6 +247,13 @@ const eventTargetMixin = {
 		await Promise.all(promises);
 	},
 
+	/**
+	 * Dispatches an Event to the specified EventTarget, (synchronously) invoking
+	 * the affected EventListeners in the appropriate order.
+	 *
+	 * @param {GameEvent} e - Event to dispatch.
+	 * @returns {this} - Returns self for method chaining.
+	 */
 	dispatchEvent(e) {
 		// Prevent duplicate events during propagation
 		if (propagatingEvent && propagatingEvent.currentTarget === this) return
@@ -187,6 +289,15 @@ const eventTargetMixin = {
 		return this
 	},
 
+	/**
+	 * Sets up a function to be called whenever the specified event is dispatched to the target.
+	 *
+	 * @param {string} type - A case-sensitive string representing the event type to listen for.
+	 * @param {function} listener - Function that is called when an event of the specified type occurs.
+	 * @param {Object} options - An options object that specifies characteristics about the event listener.
+	 *     For now, only "once" is supported, which, if true, would automatically remove the listener when invoked.
+	 * @returns {this} - Returns self for method chaining.
+	 */
 	addEventListener(type, listener, options) {
 		const _this = _eventTargetMixin.get(this);
 		const set = _this.listeners.has(type) ? _this.listeners.get(type) : new Collection();
@@ -197,6 +308,13 @@ const eventTargetMixin = {
 		return this
 	},
 
+	/**
+	 * Removes from the EventTarget an event listener previously registered with EventTarget.addEventListener().
+	 *
+	 * @param {string} type - A case-sensitive string representing the event for which to remove an event listener.
+	 * @param {function} listener - Event listener function to remove from the event target.
+	 * @returns {this} - Returns self for method chaining.
+	 */
 	removeEventListener(type, listener) {
 		const set = _eventTargetMixin.get(this).listeners.get(type);
 		if (!set) return
@@ -204,12 +322,24 @@ const eventTargetMixin = {
 		return this
 	},
 
+	/**
+	 * Designates the EventTarget as a source of bubbling events.
+	 *
+	 * @param {*} child - EventTarget from which events should bubble.
+	 * @returns {this} - Returns self for method chaining.
+	 */
 	propagateEventsFrom(child) {
 		const _child = _eventTargetMixin.get(child);
 		if (_child) _child.parent = this;
 		return this
 	},
 
+	/**
+	 * Removes the EventTarget as a source of bubbling events.
+	 *
+	 * @param {*} child - EventTarget from which events should no longer bubble.
+	 * @returns {this} - Returns self for method chaining.
+	 */
 	stopPropagatingFrom(child) {
 		const _child = _eventTargetMixin.get(child);
 		if (_child && _child.parent === this) _child.parent = null;
@@ -217,15 +347,11 @@ const eventTargetMixin = {
 	}
 };
 
-// TODO: JSDoc
-
-const unindexItem = (map, item) => {
-	map.forEach((indexer, key) => {
-		map.get(key).delete(item);
-	});
-};
-
 const _Collection = new WeakMap();
+
+/**
+ * Class that extends Set/Collection to create and access subsets via indexes.
+ */
 class IndexedCollection extends Collection {
 	constructor() {
 		super();
@@ -235,7 +361,13 @@ class IndexedCollection extends Collection {
 		});
 	}
 
-	// subset filter
+	/**
+	 * Creates a subset.
+	 *
+	 * @param {string} indexName - Key used to identify the subset.
+	 * @param {function} indexer - Function that produces an element of the subset.
+	 * @returns {this} - Returns self for method chaining.
+	 */
 	setIndex(indexName, indexer) {
 		const _this = _Collection.get(this);
 
@@ -254,16 +386,40 @@ class IndexedCollection extends Collection {
 		return this
 	}
 
-	// get subset
+	/**
+	 * Creates a subset.
+	 *
+	 * @param {string} indexName - Key used to identify the subset.
+	 * @returns {Collection} - The subset Collection.
+	 */
 	getIndexed(indexName) {
 		return _Collection.get(this).indexed.get(indexName)
 	}
 
-	// Can be called from observing logic (like a Proxy)
-	// or events (like if a component property changes)
+	/**
+	 * Removes an item from all subsets.
+	 *
+	 * @param {*} item - Item to remove.
+	 * @returns {this} - Returns self for method chaining.
+	 */
+	unindexItem(item) {
+		const map = _Collection.get(this).indexed;
+		map.forEach((indexer, key) => {
+			map.get(key).delete(item);
+		});
+		return this
+	}
+
+	/**
+	 * Removes an item from all subsets. Intended to be called from observing
+	 * logic (like a Proxy) or events (like if a component property changes)
+	 *
+	 * @param {*} item - Item to remove.
+	 * @returns {this} - Returns self for method chaining.
+	 */
 	reindexItem(item) {
 		const _this = _Collection.get(this);
-		unindexItem(_this.indexed, item); // in case item was already added
+		this.unindexItem(item); // in case item was already added
 		_this.indexers.forEach((indexer, key) => {
 			const val = indexer(item);
 			if (val !== undefined) _this.indexed.get(key).add(val);
@@ -271,23 +427,36 @@ class IndexedCollection extends Collection {
 		return this
 	}
 
+	/**
+	 * Adds an item to the Collection. All indexer functions are run against
+	 * each added item so the item is also added to the correct subset.
+	 *
+	 * @param {*} item - Item to add.
+	 * @returns {this} - Returns self for method chaining.
+	 */
 	add(item) {
 		const returnVal = super.add(item);
 		this.reindexItem(item);
 		return returnVal
 	}
 
+	/**
+	 * Removes an item from the Collection and all subsets.
+	 *
+	 * @param {*} item - Item to remove.
+	 * @returns {this} - Returns self for method chaining.
+	 */
 	delete(item) {
-		const _this = _Collection.get(this);
-		unindexItem(_this.indexed, item);
+		this.unindexItem(item);
 		return super.delete(item)
 	}
 }
 
-// TODO: JS Doc
-
 const _Factory = new WeakMap();
 
+/**
+ * A class that serves as a container for synchronous constructors.
+ */
 class Factory {
 	constructor() {
 		_Factory.set(this, {
@@ -296,11 +465,20 @@ class Factory {
 		});
 	}
 
+	/**
+	 * @param {function} middlewareFunc - Function to be called prior to all constructors.
+	 * @returns {this} - Returns self for method chaining.
+	 */
 	use(middlewareFunc) {
 		_Factory.get(this).middleware.add(middlewareFunc);
 		return this
 	}
 
+	/**
+	 * @param {string} constructName - Key to use for access to the constructor.
+	 * @param {function} construct - Constructor function.
+	 * @returns {this} - Returns self for method chaining.
+	 */
 	set(constructName, construct) {
 		const constructNames = Array.isArray(constructName) ? constructName : [ constructName ];
 		constructNames.forEach((constructName) => {
@@ -309,10 +487,19 @@ class Factory {
 		return this
 	}
 
+	/**
+	 * @param {string} constructName - Key to use for access to the constructor.
+	 * @returns {boolean} - True if the constructor is set, false otherwise.
+	 */
 	has(constructName) {
 		return _Factory.get(this).constructors.has(constructName)
 	}
 
+	/**
+	 * @param {string} constructName - Key to use for access to the constructor.
+	 * @param {Object} data - Data to pass on to the constructor.
+	 * @returns {*} - Constructor return value.
+	 */
 	create(constructName, data) {
 		const _this = _Factory.get(this);
 		const construct = _this.constructors.get(constructName);
@@ -326,10 +513,11 @@ class Factory {
 	}
 }
 
-// TODO: JS Doc
-
 const _AsyncFactory = new WeakMap();
 
+/**
+ * A class that serves as a container for asynchronous constructors.
+ */
 class AsyncFactory {
 	constructor() {
 		_AsyncFactory.set(this, {
@@ -338,11 +526,20 @@ class AsyncFactory {
 		});
 	}
 
+	/**
+	 * @param {function} middlewareFunc - Async function to be called prior to all constructors.
+	 * @returns {this} - Returns self for method chaining.
+	 */
 	use(middlewareFunc) {
 		_AsyncFactory.get(this).middleware.add(middlewareFunc);
 		return this
 	}
 
+	/**
+	 * @param {string} constructName - Key to use for access to the constructor.
+	 * @param {function} construct - Async constructor function.
+	 * @returns {this} - Returns self for method chaining.
+	 */
 	set(constructName, construct) {
 		const constructNames = Array.isArray(constructName) ? constructName : [ constructName ];
 		constructNames.forEach((constructName) => {
@@ -351,9 +548,28 @@ class AsyncFactory {
 		return this
 	}
 
+	/**
+	 * @param {string} constructName - Key to use for access to the constructor.
+	 * @returns {boolean} - True if the constructor is set, false otherwise.
+	 */
+	has(constructName) {
+		return _AsyncFactory.get(this).constructors.has(constructName)
+	}
+
+	/**
+	 * @async
+	 * @param {string} constructName - Key to use for access to the constructor.
+	 * @param {Object} data - Data to pass on to the constructor.
+	 * @returns {*} - Constructor return value.
+	 */
 	async create(constructName, data) {
 		const _this = _AsyncFactory.get(this);
 		const construct = _this.constructors.get(constructName);
+		if (!construct) {
+			console.warn(`${constructName} constructor doesn't exist`);
+			return
+		}
+
 		const middleware = [..._this.middleware];
 
 		for (const middlewareFunc of middleware) {
@@ -363,6 +579,11 @@ class AsyncFactory {
 		return await construct(constructName, data)
 	}
 }
+
+/**
+ * Module containing utility functions.
+ * @module Utilities
+ */
 
 const ADD_PROPS_METHOD_NAME = 'construct';
 
@@ -381,7 +602,15 @@ const extractConstructor = createExtractObjFunc((val, key) => key === ADD_PROPS_
 // Extracts an object with only the function properties (methods)
 const extractMethods = createExtractObjFunc((val, key) => key !== ADD_PROPS_METHOD_NAME);
 
-// Creates an extendable class that includes the provided mixins
+/**
+ * Returns a function that wraps the given class and applies the provided mixin objects.
+ * Ex.
+ *     const MixedWithPerson = createMixinFunc(Person)
+ *     class Author extends MixedWithPerson(mixin1, mixin2, ...) { ... }
+ *
+ * @param {function} Clazz - Class to be mixed with.
+ * @returns {function} - Function that applies mixins to a new class extending Clazz.
+ */
 const createMixinFunc = (Clazz) => (...mixins) => {
 	const constructors = mixins.map(mixin => extractConstructor(mixin).construct);
 	const methodsMixins = mixins.map(mixin => extractMethods(mixin));
@@ -408,9 +637,20 @@ const createMixinFunc = (Clazz) => (...mixins) => {
 	return Mixable
 };
 
+/**
+ * MixedWith provides the ability to add mixins to a class that does not
+ * extend a super class.
+ *
+ * @type {function}
+ * @param {...Object} - Mixin objects
+ */
 const MixedWith = createMixinFunc();
 
-// Creates nested empty arrays
+/**
+ * Creates nested empty arrays.
+ * Ex. createArray(2, 2) === [ [ , ], [ , ] ]
+ * @returns {array} - Outermost array.
+ */
 const createArray = (...args) => {
 	if (args.length === 0) return []
 
@@ -436,11 +676,27 @@ class ObservableChangeEvent extends GameEvent {
 
 const handledObjs = new WeakMap();
 
-var observableMixin = Object.assign({}, eventTargetMixin, {
+/**
+ * Observable mixin
+ *
+ * This provides properties and methods used for observing property value
+ * changes and/or method calls.
+ *
+ * @mixin observableMixin
+ * @mixes eventTargetMixin
+ */
+const observableMixin = {
 	construct() {
 		eventTargetMixin.construct.call(this);
 	},
 
+	/**
+	 * Observes and dispatches an ObservableChangeEvent each time the specified
+	 * property changes or method is called.
+	 *
+	 * @param {string} prop - Name of property/method to observe.
+	 * @returns {this} - Returns self for method chaining.
+	 */
 	makeObservable(prop) {
 		if (!handledObjs.has(this))
 			handledObjs.set(this, new Set());
@@ -475,12 +731,17 @@ var observableMixin = Object.assign({}, eventTargetMixin, {
 		}
 		return this
 	},
-});
+};
+
+var observableMixin$1 = Object.assign({}, eventTargetMixin, observableMixin);
 
 const _Entity = new WeakMap(); // Store private variables here
 
-/** Class that represents an Entity (the "E" in the ECS design pattern). */
-class Entity extends MixedWith(observableMixin) {
+/**
+ * Class representing an Entity (the "E" in the ECS design pattern).
+ * @mixes observableMixin
+ */
+class Entity extends MixedWith(observableMixin$1) {
 
 	/**
 	 * Create an Entity.
@@ -542,8 +803,11 @@ const getAllObjKeys = (obj) => [... new Set(obj ? Object.keys(obj).concat(
 const _Component = new WeakMap(); // Store private variables here
 const _ProtoChainKeys = new WeakMap(); // Cache object keys from prototype chains
 
-/** Class that represents an Component (the "C" in the ECS design pattern). */
-class Component extends MixedWith(observableMixin) {
+/**
+ * Class representing a Component (the "C" in the ECS design pattern).
+ * @mixes observableMixin
+ */
+class Component extends MixedWith(observableMixin$1) {
 
 	/**
 	 * Create a Component.
@@ -652,11 +916,12 @@ const unimplemented = name => () => {
 	throw new Error(`${name} not set`)
 };
 
+const _System = new WeakMap();
+
 /**
  * Class representing a System.
  * @mixes eventTargetMixin
  */
-const _System = new WeakMap();
 class System extends MixedWith(eventTargetMixin) {
 	constructor() {
 		super();
@@ -666,30 +931,64 @@ class System extends MixedWith(eventTargetMixin) {
 		});
 	}
 
+	/**
+	 * Primarily used for dependency injection from the parent scene.
+	 *
+	 * @param {function} func - Function to use when getting entities.
+	 * @returns {this} - Returns self for method chaining.
+	 */
 	setGetEntitiesFunc(func) {
 		_System.get(this).getEntitiesFunc = func;
 		return this
 	}
 
+	/**
+	 * Used to remove the injected "getEntitiesFunc" function.
+	 *
+	 * @returns {this} - Returns self for method chaining.
+	 */
 	unsetGetEntitiesFunc() {
 		_System.get(this).getEntitiesFunc = unimplemented('getEntitiesFunc');
 		return this
 	}
 
+	/**
+	 * Gets entities using the previously-set "getEntitiesFunc".
+	 *
+	 * @param {string} indexName - .
+	 * @returns {*} - Returned entities.
+	 */
 	getEntities(indexName) {
 		return _System.get(this).getEntitiesFunc(indexName)
 	}
 
+	/**
+	 * Primarily used for dependency injection from the parent scene.
+	 *
+	 * @param {function} func - Function to use when adding an entity.
+	 * @returns {this} - Returns self for method chaining.
+	 */
 	setAddEntityFunc(func) {
 		_System.get(this).addEntityFunc = func;
 		return this
 	}
 
+	/**
+	 * Used to remove the injected "addEntityFunc" function.
+	 *
+	 * @returns {this} - Returns self for method chaining.
+	 */
 	unsetAddEntityFunc() {
 		_System.get(this).addEntityFunc = unimplemented('addEntityFunc');
 		return this
 	}
 
+	/**
+	 * Add an entity using the previously-set "addEntityFunc".
+	 *
+	 * @param {Entity} entity - The entity to add.
+	 * @returns {this} - Returns self for method chaining.
+	 */
 	addEntity(entity) {
 		_System.get(this).addEntityFunc(entity);
 		return this
@@ -1051,10 +1350,11 @@ class Game extends MixedWith(eventTargetMixin) {
 	constructor() {
 		super();
 		const _this = {
+			assetFetcher: null,
 			activeScene: null,
+			activeSceneLoaded: false,
 			scenes: new Map(),
 			running: false,
-			bubbledEvent: false,
 			stopGameEventListener: () => this.stopGame(),
 			changeSceneEventListener: event => this.changeScene(event.sceneName),
 		};
@@ -1128,6 +1428,7 @@ class Game extends MixedWith(eventTargetMixin) {
 		if (!_this.scenes.has(sceneName))
 			throw new Error(`Scene "${sceneName}" doesn't exist`)
 		_this.activeScene = _this.scenes.get(sceneName);
+		_this.activeSceneLoaded = false;
 
 		// Fires changeScene event
 		this.removeEventListener('changeScene', _this.changeSceneEventListener);
@@ -1141,15 +1442,34 @@ class Game extends MixedWith(eventTargetMixin) {
 	// --------------------------------------------------------------------------
 
 	/**
-	 * Passes assetFetcher to active scene and starts loading process.
+	 * Injects assetFetcher to be used by scenes during load
+	 *
+	 * @param {AssetFetcher} assetFetcher - AssetFetcher to be used in handlers.
+	 * @returns {this} - Returns self for method chaining.
+	 */
+	setAssetFetcher(assetFetcher) {
+		_Game.get(this).assetFetcher = assetFetcher;
+		return this
+	}
+
+	/**
+	 * Starts loading process.
 	 *
 	 * @async
-	 * @param {AssetFetcher} assetFetcher - AssetFetcher to be used in handlers.
-	 * @returns {Promise} - Promise that resolves once the load event handler(s) resolve.
+	 * @param {string=} sceneName - Name used to uniquely identify the scene to find.
+	 *
+	 * @throws - Will throw an error if a scene is not found with the given name or,
+	 *     if no sceneName is provided and there is no active scene.
 	 */
-	async load(assetFetcher) {
-		const scene = _Game.get(this).activeScene;
-		return await scene.load(assetFetcher)
+	async load(sceneName) {
+		const _this = _Game.get(this);
+		if (sceneName) this.changeScene(sceneName);
+		else if (!_this.activeScene)
+			throw new Error('Active scene not set. Use changeScene() method or provide a sceneName to run()')
+
+		const scene = _this.activeScene;
+		await scene.load(_this.assetFetcher);
+		_this.activeSceneLoaded = true;
 	}
 
 	/**
@@ -1167,21 +1487,14 @@ class Game extends MixedWith(eventTargetMixin) {
 	}
 
 	/**
-	 * Starts the main game loop
+	 * Starts the main game loop.
 	 *
 	 * @param {string=} sceneName - Name used to uniquely identify the scene to find.
 	 * @returns {this} - Returns self for method chaining.
-	 *
-	 * @throws - Will throw an error if a scene is not found with the given name or,
-	 *     if no sceneName is provided and there is no active scene.
 	 */
 	run(sceneName) {
 		const _this = _Game.get(this);
 		_this.running = true;
-
-		if (sceneName) this.changeScene(sceneName);
-		else if (!_this.activeScene)
-			throw new Error('Active scene not set. Use changeScene() method or provide a sceneName to run()')
 
 		const main = (timestamp) => {
 			if (!_this.running) return
@@ -1189,7 +1502,15 @@ class Game extends MixedWith(eventTargetMixin) {
 			requestAnimationFrame(main);
 		};
 
-		main(performance.now());
+		const startMain = () => main(performance.now());
+		
+		// Run load process if the current scene isn't loaded yet or loading a different scene
+		if (!_this.activeSceneLoaded || _this.scenes.get(sceneName) !== _this.activeScene) {
+			this.load(sceneName).then(startMain);
+		} else {
+			startMain();
+		}
+
 		return this
 	}
 }
@@ -1200,6 +1521,8 @@ class FetchProgressEvent extends GameEvent {
 		Object.defineProperty(this, 'progress', { value: progress, writable: false });
 	}
 }
+
+// -------------------------------------------------------------------------
 
 const IMAGE_EXTENSIONS = Object.freeze(['jpg', 'jpeg', 'gif', 'bmp', 'png', 'tif', 'tiff']);
 const AUDIO_EXTENSIONS = Object.freeze(['ogg', 'wav', 'mp3']);
@@ -1225,8 +1548,7 @@ const resolveAudio = response => response.arrayBuffer();
 const resolveVideo = createBlobResolveFunc('video');
 const resolveText = response => response.text();
 
-// fetchAsset() - fetches and converts the response into the appropriate type of object
-var fetchAsset = (path, callback) => {
+const fetchAsset = (path) => {
 	const parts = path.split('.');
 	const ext = parts.length !== 0 ? parts[parts.length - 1].toLowerCase() : 'json';
 
@@ -1238,20 +1560,17 @@ var fetchAsset = (path, callback) => {
 	else if (VIDEO_EXTENSIONS.includes(ext)) resolve = resolveVideo;
 	else resolve = resolveText;
 
-	if (callback) {
-		const wrappedCallback = val => {
-			callback(val);
-			return val
-		};
-		return fetchOK(path).then(resolve).then(wrappedCallback).catch(wrappedCallback)
-	}
-
 	return fetchOK(path).then(resolve)
 };
 
+// -------------------------------------------------------------------------
+
 const _AssetFetcher = new WeakMap();
 
-/** A class used to fetch assets */
+/**
+ * Class used to fetch assets.
+ * @mixes eventTargetMixin
+ */
 class AssetFetcher extends MixedWith(eventTargetMixin) {
 	constructor() {
 		super();
@@ -1284,7 +1603,7 @@ class AssetFetcher extends MixedWith(eventTargetMixin) {
 
 	/**
 	 * Fetch all queued assets. On each asset fetch, a "fetchProgress" event
-	 * will be fired with the current percent complete. (Ex. 0.5 for 50%)
+	 * will be dispatched with the current percent complete. (Ex. 0.5 for 50%)
 	 *
 	 * @returns {Promise<Object[]>} - A promise that resolves when all assets have been fetched.
 	 */
@@ -1292,17 +1611,18 @@ class AssetFetcher extends MixedWith(eventTargetMixin) {
 		const paths = [..._AssetFetcher.get(this).queuedAssetPaths];
 
 		let count = 0;
-		const dispatchProgressEvent = () => {
+		const dispatchProgressEvent = (val) => {
 			count += 1;
 			this.dispatchEvent(new FetchProgressEvent('fetchProgress', { progress: count / paths.length }));
+			return val
 		};
 		return Promise.all(
-			paths.map(path => fetchAsset(path, dispatchProgressEvent).then(asset => [ path, asset ]))
+			paths.map(path => fetchAsset(path).then(dispatchProgressEvent).then(asset => [ path, asset ]))
 		)
 	}
 
 	/**
-	 * Fetch an asset, bypassing the queue.
+	 * Fetch an asset, bypassing the queue. Does not dispatch a "fetchProgress" event.
 	 *
 	 * @param {string} path - File path/url at which the file may be found.
 	 * @returns {Promise<*>} - Returns a promise that resolves to the fetched resource.
@@ -1324,6 +1644,14 @@ class TiledMap {
 		this.layerCanvases = new Map();
 		this.objects = {};
 		this.startTime = null;
+	}
+
+	get bgm() {
+		return this.data.properties && this.data.properties.bgm
+	}
+
+	get bgmLoopTarget() {
+		return this.data.properties && this.data.properties.bgmLoopTarget
 	}
 
 	get tileWidth() {
@@ -1353,13 +1681,13 @@ class TiledMap {
 	}
 
 	getResourcePaths() {
-		const { tilesets, properties } = this.data;
+		const { tilesets } = this.data;
 
 		// Get tile image paths
 		const paths = tilesets.map(({ image }) => image);
 
 		// Get BGM paths
-		if (properties.bgm) paths.push(properties.bgm);
+		if (this.bgm) paths.push(this.bgm);
 
 		return this.basePath ?
 			paths.map(path => this.getRootRelativePath(path))
@@ -1689,62 +2017,108 @@ class InputManager {
 }
 
 /**
- * Game module.
- * @module Game
+ * Game namespace.
+ * @namespace
  */
+const game = {
 
-/** Object representing the module namespace. */
-const namespace = {
+	/**
+	 * @returns {Collection} - A new Collection instance.
+	 */
 	createCollection(...args) {
 		return new Collection(...args)
 	},
 
+	/**
+	 * @returns {IndexedCollection} - A new IndexedCollection instance.
+	 */
 	createIndexedCollection(...args) {
 		return new IndexedCollection(...args)
 	},
 
-	createEvent(type, options) {
-		return new GameEvent(type, options)
+	/**
+	 * @returns {GameEvent} - A new GameEvent instance.
+	 */
+	createEvent(...args) {
+		return new GameEvent(...args)
 	},
 
-	createFactory() {
-		return new Factory()
+	/**
+	 * @returns {AsyncFactory} - A new AsyncFactory instance.
+	 */
+	createAsyncFactory(...args) {
+		return new AsyncFactory(...args)
 	},
 
-	createEntity() {
-		return new Entity()
+	/**
+	 * @returns {Factory} - A new Factory instance.
+	 */
+	createFactory(...args) {
+		return new Factory(...args)
 	},
 
-	createComponent(dataObj) {
-		return new Component(dataObj)
+	/**
+	 * @returns {Entity} - A new Entity instance.
+	 */
+	createEntity(...args) {
+		return new Entity(...args)
 	},
 
-	createSystem() {
-		return new System()
+	/**
+	 * @returns {Component} - A new Component instance.
+	 */
+	createComponent(...args) {
+		return new Component(...args)
 	},
 
-	createScene() {
-		return new Scene()
+	/**
+	 * @returns {System} - A new System instance.
+	 */
+	createSystem(...args) {
+		return new System(...args)
 	},
 
-	createGame() {
-		return new Game()
+	/**
+	 * @returns {Scene} - A new Scene instance.
+	 */
+	createScene(...args) {
+		return new Scene(...args)
 	},
 
-	createAssetFetcher() {
-		return new AssetFetcher()
+	/**
+	 * @returns {Game} - A new Game instance.
+	 */
+	createGame(...args) {
+		return new Game(...args)
 	},
 
-	createTiledMap() {
-		return new TiledMap()
+	/**
+	 * @returns {AssetFetcher} - A new AssetFetcher instance.
+	 */
+	createAssetFetcher(...args) {
+		return new AssetFetcher(...args)
 	},
 
-	createInputManager() {
-		return new InputManager()
+	/**
+	 * @returns {TiledMap} - A new TiledMap instance.
+	 */
+	createTiledMap(...args) {
+		return new TiledMap(...args)
 	},
 
-	createEntityFactory() {
-		return (new Factory()).use((constructorName, data = {}) =>
+	/**
+	 * @returns {InputManager} - A new InputManager instance.
+	 */
+	createInputManager(...args) {
+		return new InputManager(...args)
+	},
+
+	/**
+	 * @returns {Factory} - A new Factory instance built with a
+	 *     middleware function for creating Entities.
+	 */
+	createEntityFactory(...args) {
+		return (new Factory(...args)).use((constructorName, data = {}) =>
 			({
 				componentFactory: this.createComponentFactory(),
 				entity: new Entity(),
@@ -1753,8 +2127,12 @@ const namespace = {
 		)
 	},
 
-	createComponentFactory() {
-		return (new Factory()).use((constructorName, data = {}) =>
+	/**
+	 * @returns {Factory} - A new Factory instance built with a
+	 *     middleware function for creating Components.
+	 */
+	createComponentFactory(...args) {
+		return (new Factory(...args)).use((constructorName, data = {}) =>
 			({
 				component: new Component(),
 				data,
@@ -1762,8 +2140,12 @@ const namespace = {
 		)
 	},
 
-	createSystemFactory() {
-		return (new AsyncFactory()).use(async (constructorName, data = {}) =>
+	/**
+	 * @returns {Factory} - A new Factory instance built with a
+	 *     middleware function for creating Systems.
+	 */
+	createSystemFactory(...args) {
+		return (new AsyncFactory(...args)).use(async (constructorName, data = {}) =>
 			({
 				system: new System(),
 				data,
@@ -1771,8 +2153,12 @@ const namespace = {
 		)
 	},
 
-	createSceneFactory() {
-		return (new AsyncFactory()).use(async (constructorName, data = {}) =>
+	/**
+	 * @returns {Factory} - A new Factory instance built with a
+	 *     middleware function for creating Scenes.
+	 */
+	createSceneFactory(...args) {
+		return (new AsyncFactory(...args)).use(async (constructorName, data = {}) =>
 			({
 				entityFactory: this.createEntityFactory(),
 				systemFactory: this.createSystemFactory(),
@@ -2082,9 +2468,9 @@ var createRenderSystem = async (systemName, { system, tiledMap, entityFactory })
 // TimeOffset class
 const _time = Symbol('_time');
 class TimeOffset {
-	constructor(timeStr, millisecondsMode) {
+	constructor(timeStr, millisecondsMode = false) {
 		this[_time] = timeStr;
-		this.msMode = millisecondsMode || false;
+		this.msMode = millisecondsMode;
 	}
 	valueOf() {
 		let val = 0;
@@ -2124,7 +2510,8 @@ var createSoundSystem = async (systemName, { system, tiledMap }) => {
 		source.buffer = sound;
 		if (callback) source.onended = callback;
 		let gainNode = context.createGain();
-		gainNode.gain.value = 1;
+		gainNode.gain.setValueAtTime(1, 0);
+		//gainNode.gain.value = 1
 
 		source.connect(gainNode);
 		gainNode.connect(context.destination);
@@ -2145,12 +2532,15 @@ var createSoundSystem = async (systemName, { system, tiledMap }) => {
 	return system
 
 		.addEventListener('load', async ({ assetFetcher }) => {
+			assetFetcher.queueAsset(tiledMap.bgm);
 			assetFetcher.queueAsset('sfx/sfx1.wav');
 		})
 
 		.addEventListener('loaded', async ({ assets }) => {
+			const bgm = assets.get(tiledMap.bgm);
 			const asset = assets.get('sfx/sfx1.wav');
 			tracks['sfx/sfx1.wav'] = await context.decodeAudioData(asset);
+			tracks['bgm'] = await context.decodeAudioData(bgm);
 		})
 
 		.addEventListener('mounted', ({ entities }) => {
@@ -2207,12 +2597,12 @@ var createSoundSystem = async (systemName, { system, tiledMap }) => {
 				// Adjust the sound gain depending on the volume setting and the sound distance...
 				if (c.gainNode) {
 					if (distanceToCamCenter <= radius) {
-						c.gainNode.gain.value = c.volume;
+						c.gainNode.gain.setValueAtTime(c.volume, 0);
 					} else if (distanceToCamCenter - radius >= radius * 2) {
-						c.gainNode.gain.value = 0;
+						c.gainNode.gain.setValueAtTime(0, 0);
 					} else {
 						const calc = ((distanceToCamCenter - radius) / (radius * 2)) * c.volume;
-						c.gainNode.gain.value = calc;
+						c.gainNode.gain.setValueAtTime(calc, 0);
 					}
 				}
 
@@ -2239,9 +2629,9 @@ var createSpawnSystem = async (systemName, { system, entityFactory }) => system
 		const spawnedComponents = entities.getIndexed('spawned');
 
 		// Filter down to only the spawners that are ready to spawn (have no entities left)
-		const readySpawnerComponents = spawnerComponents.reject(spawnerComponent =>
-			spawnedComponents.some(spawnedComponent =>
-				spawnedComponent.spawnerSource === spawnerComponent.name
+		const readySpawnerComponents = spawnerComponents.filter(spawnerComponent =>
+			spawnedComponents.every(spawnedComponent =>
+				spawnedComponent.spawnerSource !== spawnerComponent.name
 			)
 		);
 
@@ -2567,21 +2957,21 @@ var createLevel1 = async (sceneName, { scene, systemFactory, entityFactory, tile
 		));
 	});
 
-const assetFetcher = namespace.createAssetFetcher();
+const assetFetcher = game.createAssetFetcher();
 
-var createSceneFactory = () => namespace.createSceneFactory()
+var createSceneFactory = () => game.createSceneFactory()
 	.use(async (sceneName, sceneData) => {
 		const tiledData = await assetFetcher.fetch(`json/${sceneName}.json`);
 
 		// Create TiledMap instance
-		const tiledMap = namespace.createTiledMap()
+		const tiledMap = game.createTiledMap()
 			.setBasePath((new URL('/', window.location.href)).href)
 			.decorate(tiledData);
 
 		buildEntityFactory(sceneData.entityFactory);
 
 		sceneData.systemFactory.use(async (systemName, systemData) => {
-			systemData.inputManager = namespace.createInputManager();
+			systemData.inputManager = game.createInputManager();
 			systemData.tiledMap = tiledMap;
 			systemData.entityFactory = sceneData.entityFactory;
 			return systemData
@@ -2596,14 +2986,10 @@ var createSceneFactory = () => namespace.createSceneFactory()
 	.set('level-1', createLevel1);
 
 const sceneFactory = createSceneFactory();(async () => {
-	const game = namespace.createGame()
+	window.game = game.createGame()
+		.setAssetFetcher(game.createAssetFetcher())
 		.setScene('level-1', await sceneFactory.create('level-1'))
-		.changeScene('level-1');
-	
-	await game.load(namespace.createAssetFetcher());
-	game.run();
+		.run('level-1');
 })();
-
-window.game = game;
 
 }());
