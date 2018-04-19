@@ -796,9 +796,15 @@ class Entity extends MixedWith(observableMixin$1) {
 	}
 }
 
-const getAllObjKeys = (obj) => [... new Set(obj ? Object.keys(obj).concat(
-	getAllObjKeys(Object.getPrototypeOf(obj))
-) : [])];
+const getAllObjKeys = (obj) => {
+	if (!obj || obj === Object.prototype) return []
+  
+	const set = new Set(Object.getOwnPropertyNames(obj).concat(
+		getAllObjKeys(Object.getPrototypeOf(obj))
+	));
+	set.delete('constructor');
+	return [...set]
+};
 
 const _Component = new WeakMap(); // Store private variables here
 const _ProtoChainKeys = new WeakMap(); // Cache object keys from prototype chains
@@ -2662,34 +2668,36 @@ var buildSystemFactory = (systemFactory) => systemFactory
 	.set('spawn', createSpawnSystem)
 	.set('update', createUpdateSystem);
 
+const defaultData$1 = {
+	x: 0,
+	y: 0,
+	width: 0,
+	height: 0,
+	mapX: 0,
+	mapY: 0,
+	mapWidth: 0,
+	mapHeight: 0,
+	following: null
+};
+
+class CameraComponent {
+	constructor(data) {
+		Object.assign(this, defaultData$1, data);
+	}
+	get mapHalfWidth() { return this.mapWidth / 2 }
+	get mapHalfHeight() { return this.mapHeight / 2 }
+	get mapCenterX() { return this.mapX + this.mapHalfWidth }
+	get mapCenterY() { return this.mapY + this.mapHalfHeight }
+}
+
 var createCamera = (componentType, { component, data } = {}) =>
-	component.decorate({
-		x: data.x,
-		y: data.y,
-		width: data.width,
-		height: data.height,
-		mapX: data.mapX,
-		mapY: data.mapY,
-		mapWidth: data.mapWidth,
-		mapHeight: data.mapHeight,
-		get mapHalfWidth() { return this.mapWidth / 2 },
-		get mapHalfHeight() { return this.mapHeight / 2 },
-		get mapCenterX() { return this.mapX + this.mapHalfWidth },
-		get mapCenterY() { return this.mapY + this.mapHalfHeight },
-		following: data.following
-	});
+	component.decorate(new CameraComponent(data));
 
 var createStaticPhysicsBody = (componentType, { component, data: {
-	x,
-	y,
-	width,
-	height
+	x, y, width, height
 } } = {}) =>
 	component.decorate({
-		x: x,
-		y: y,
-		width: width,
-		height: height,
+		x, y, width, height,
 		halfWidth: width / 2,
 		halfHeight: height / 2,
 		midPointX: x + (width / 2),
@@ -2702,95 +2710,96 @@ var createSpawner = (componentType, { component, data: { type = 'Monster', name,
 var createSpawned = (componentType, { component, data: { spawnerSource } } = {}) =>
 	component.decorate({ spawnerSource });
 
+const defaultData$2 = {
+	x: 0,
+	y: 0,
+	width: 0,
+	height: 0,
+	flipped: false,
+	frame: null,
+	layer: null
+};
+
 const _x = Symbol('_x');
 const _y = Symbol('_y');
 const _width = Symbol('_width');
 const _height = Symbol('_height');
 
-var createSprite = (componentType, { component, data: {
-	x = 0,
-	y = 0,
-	width = 0,
-	height = 0,
-	frame,
-	layer
-} } = { data: {} }) => {
-	const obj = {
-		get x() {
-			return this[_x]
-		},
-		set x(val) {
-			this[_x] = val;
-			this.midPointX = val + this.halfWidth;
-		},
+class SpriteComponent {
+	constructor(data) {
+		Object.assign(this, defaultData$2, data);
+	}
 
-		get y() {
-			return this[_y]
-		},
-		set y(val) {
-			this[_y] = val;
-			this.midPointY = val + this.halfHeight;
-		},
+	get x() {
+		return this[_x]
+	}
+	set x(val) {
+		this[_x] = val;
+		this.midPointX = val + this.halfWidth;
+	}
 
-		get width() {
-			return this[_width]
-		},
-		set width(val) {
-			this[_width] = val;
-			this.halfWidth = val / 2;
-			this.midPointX = this.x + this.halfWidth;
-		},
+	get y() {
+		return this[_y]
+	}
+	set y(val) {
+		this[_y] = val;
+		this.midPointY = val + this.halfHeight;
+	}
 
-		get height() {
-			return this[_height]
-		},
-		set height(val) {
-			this[_height] = val;
-			this.halfHeight = val / 2;
-			this.midPointY = this.y + this.halfHeight;
-		}
-	};
-	obj.x = x;
-	obj.y = y;
-	obj.width = width;
-	obj.height = height;
-	
-	Object.assign(obj, {
-		frame,
-		layer,
-		flipped: false,
-	});
-	return component.decorate(obj)
-};
+	get width() {
+		return this[_width]
+	}
+	set width(val) {
+		this[_width] = val;
+		this.halfWidth = val / 2;
+		this.midPointX = this.x + this.halfWidth;
+	}
+
+	get height() {
+		return this[_height]
+	}
+	set height(val) {
+		this[_height] = val;
+		this.halfHeight = val / 2;
+		this.midPointY = this.y + this.halfHeight;
+	}
+}
+
+var createSprite = (componentType, { component, data = {} }) =>
+	component.decorate(new SpriteComponent(data));
 
 const _entity = Symbol('_x');
 const _spriteComp = Symbol('_x');
 
+class SpritePhysicsComponent {
+	constructor(entity) {
+		this[_entity] = entity;
+		this.accX = 0;
+		this.accY = 0;
+		this.spdX = 0;
+		this.spdY = 0;
+	}
+	get [_spriteComp]() { return this[_entity].getComponent('sprite') }
+	get x() { return this[_spriteComp].x }
+	set x(val) { this[_spriteComp].x = val; }
+	get y() { return this[_spriteComp].y }
+	set y(val) { this[_spriteComp].y = val; }
+	get width() { return this[_spriteComp].width }
+	set width(val) { this[_spriteComp].width = val; }
+	get height() { return this[_spriteComp].height }
+	set height(val) { this[_spriteComp].height = val; }
+	get midPointX() { return this[_spriteComp].midPointX }
+	set midPointX(val) { this[_spriteComp].midPointX = val; }
+	get midPointY() { return this[_spriteComp].midPointY }
+	set midPointY(val) { this[_spriteComp].midPointY = val; }
+	get halfWidth() { return this[_spriteComp].halfWidth }
+	set halfWidth(val) { this[_spriteComp].halfWidth = val; }
+	get halfHeight() { return this[_spriteComp].halfHeight }
+	set halfHeight(val) { this[_spriteComp].halfHeight = val; }
+}
+
 var createSpritePhysics = (componentType, { component, data: { entity } } = {}) =>
-	component.decorate({
-		[_entity]: entity,
-		accX: 0,
-		accY: 0,
-		spdX: 0,
-		spdY: 0,
-		get [_spriteComp]() { return this[_entity].getComponent('sprite') },
-		get x() { return this[_spriteComp].x },
-		set x(val) { this[_spriteComp].x = val; },
-		get y() { return this[_spriteComp].y },
-		set y(val) { this[_spriteComp].y = val; },
-		get width() { return this[_spriteComp].width },
-		set width(val) { this[_spriteComp].width = val; },
-		get height() { return this[_spriteComp].height },
-		set height(val) { this[_spriteComp].height = val; },
-		get midPointX() { return this[_spriteComp].midPointX },
-		set midPointX(val) { this[_spriteComp].midPointX = val; },
-		get midPointY() { return this[_spriteComp].midPointY },
-		set midPointY(val) { this[_spriteComp].midPointY = val; },
-		get halfWidth() { return this[_spriteComp].halfWidth },
-		set halfWidth(val) { this[_spriteComp].halfWidth = val; },
-		get halfHeight() { return this[_spriteComp].halfHeight },
-		set halfHeight(val) { this[_spriteComp].halfHeight = val; }
-	});
+	component.decorate(new SpritePhysicsComponent(entity));
 
 const _entity$1 = Symbol('_entity');
 const _spriteComp$1 = Symbol('_spriteComp');
@@ -2799,55 +2808,70 @@ const _y$1 = Symbol('_y');
 const _followSprite = Symbol('_followSprite');
 const gainNodeMap = new WeakMap();
 
-var createSpriteSound = (componentType, { component, data } = {}) =>
-	component.decorate({
-		[_entity$1]: data.entity,
-		src: data.src,
-		play: false,
-		volume: 1,
-		[_followSprite]: true,
-		get [_spriteComp$1]() { return this[_entity$1].getComponent('sprite') },
-		get followSprite() { return this[_followSprite] },
-		set followSprite(val) {
-			if(this[_followSprite] && !val) {
-				this.x = this[_spriteComp$1].midPointX;
-				this.y = this[_spriteComp$1].midPointY;
-			}
-			this[_followSprite] = val;
-		},
-		get x() { return this.followSprite ? this[_spriteComp$1].midPointX : this[_x$1] },
-		set x(val) { this[_x$1] = val; },
-		get y() { return this.followSprite ? this[_spriteComp$1].midPointY : this[_y$1] },
-		set y(val) { this[_y$1] = val; },
-		set gainNode(val) {
-			gainNodeMap.set(this, val);
-		},
-		get gainNode() {
-			return gainNodeMap.get(this)
+class SpriteSoundComponent {
+	constructor(data) {
+		this[_entity$1] = data.entity;
+		this.src = data.src;
+		this.play = false;
+		this.volume = 1;
+		this[_followSprite] = true;
+	}
+
+	get [_spriteComp$1]() { return this[_entity$1].getComponent('sprite') }
+
+	get followSprite() { return this[_followSprite] }
+	set followSprite(val) {
+		if(this[_followSprite] && !val) {
+			this.x = this[_spriteComp$1].midPointX;
+			this.y = this[_spriteComp$1].midPointY;
 		}
-	});
+		this[_followSprite] = val;
+	}
+
+	get x() { return this.followSprite ? this[_spriteComp$1].midPointX : this[_x$1] }
+	set x(val) { this[_x$1] = val; }
+
+	get y() { return this.followSprite ? this[_spriteComp$1].midPointY : this[_y$1] }
+	set y(val) { this[_y$1] = val; }
+
+	set gainNode(val) {
+		gainNodeMap.set(this, val);
+	}
+	get gainNode() {
+		return gainNodeMap.get(this)
+	}
+}
+
+var createSpriteSound = (componentType, { component, data } = {}) =>
+	component.decorate(new SpriteSoundComponent(data));
 
 var createBeing = (componentType, { component, data: { type } } = {}) =>
 	component.decorate({ type });
 
 const _state = Symbol('_state');
+class StateComponent {
+	constructor(initialState) {
+		Object.assign(this, {
+			lastState: null,
+			lastUpdate: null,
+			grounded: false,
+			groundHit: false,
+		});
+		this[_state] = initialState;
+	}
+
+	get state() {
+		return this[_state]
+	}
+	set state(val) {
+		this.lastState = this[_state];
+		this[_state] = val;
+		this.lastUpdate = window.performance.now();
+	}
+}
 
 var createState = (componentType, { component, data: { initialState } } = {}) =>
-	component.decorate({
-		[_state]: initialState,
-		lastState: null,
-		lastUpdate: null,
-		grounded: false,
-		groundHit: false,
-		get state() {
-			return this[_state]
-		},
-		set state(val) {
-			this.lastState = this[_state];
-			this[_state] = val;
-			this.lastUpdate = window.performance.now();
-		}
-	});
+	component.decorate(new StateComponent(initialState));
 
 var buildComponentFactory = (componentFactory) => componentFactory
 	.set('camera', createCamera)
