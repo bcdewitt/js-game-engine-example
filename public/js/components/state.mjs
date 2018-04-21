@@ -1,6 +1,9 @@
+import Game from '../js-game-engine/esm/index.mjs'
+
 const _state = Symbol('_state')
-class StateComponent {
+class StateComponent extends Game.Component {
 	constructor(initialState) {
+		super()
 		Object.assign(this, {
 			lastState: null,
 			lastUpdate: null,
@@ -20,5 +23,5 @@ class StateComponent {
 	}
 }
 
-export default (componentType, { component, data: { initialState } } = {}) =>
-	component.decorate(new StateComponent(initialState))
+export default (componentType, { data: { initialState } } = {}) =>
+	new StateComponent(initialState)

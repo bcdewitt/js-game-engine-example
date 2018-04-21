@@ -1,8 +1,11 @@
+import Game from '../js-game-engine/esm/index.mjs'
+
 const _entity = Symbol('_x')
 const _spriteComp = Symbol('_x')
 
-class SpritePhysicsComponent {
+class SpritePhysicsComponent extends Game.Component {
 	constructor(entity) {
+		super()
 		this[_entity] = entity
 		this.accX = 0
 		this.accY = 0
@@ -28,5 +31,5 @@ class SpritePhysicsComponent {
 	set halfHeight(val) { this[_spriteComp].halfHeight = val }
 }
 
-export default (componentType, { component, data: { entity } } = {}) =>
-	component.decorate(new SpritePhysicsComponent(entity))
+export default (componentType, { data: { entity } } = {}) =>
+	new SpritePhysicsComponent(entity)

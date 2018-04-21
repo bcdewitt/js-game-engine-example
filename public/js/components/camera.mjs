@@ -1,18 +1,19 @@
-const defaultData = {
-	x: 0,
-	y: 0,
-	width: 0,
-	height: 0,
-	mapX: 0,
-	mapY: 0,
-	mapWidth: 0,
-	mapHeight: 0,
-	following: null
-}
+import Game from '../js-game-engine/esm/index.mjs'
 
-class CameraComponent {
+class CameraComponent extends Game.Component {
 	constructor(data) {
-		Object.assign(this, defaultData, data)
+		super()
+		Object.assign(this, {
+			x: 0,
+			y: 0,
+			width: 0,
+			height: 0,
+			mapX: 0,
+			mapY: 0,
+			mapWidth: 0,
+			mapHeight: 0,
+			following: null
+		}, data)
 	}
 	get mapHalfWidth() { return this.mapWidth / 2 }
 	get mapHalfHeight() { return this.mapHeight / 2 }
@@ -20,5 +21,5 @@ class CameraComponent {
 	get mapCenterY() { return this.mapY + this.mapHalfHeight }
 }
 
-export default (componentType, { component, data } = {}) =>
-	component.decorate(new CameraComponent(data))
+export default (componentType, { data } = {}) =>
+	new CameraComponent(data)

@@ -1,3 +1,5 @@
+import Game from '../js-game-engine/esm/index.mjs'
+
 const _entity = Symbol('_entity')
 const _spriteComp = Symbol('_spriteComp')
 const _x = Symbol('_x')
@@ -5,8 +7,9 @@ const _y = Symbol('_y')
 const _followSprite = Symbol('_followSprite')
 const gainNodeMap = new WeakMap()
 
-class SpriteSoundComponent {
+class SpriteSoundComponent extends Game.Component {
 	constructor(data) {
+		super()
 		this[_entity] = data.entity
 		this.src = data.src
 		this.play = false
@@ -39,5 +42,5 @@ class SpriteSoundComponent {
 	}
 }
 
-export default (componentType, { component, data } = {}) =>
-	component.decorate(new SpriteSoundComponent(data))
+export default (componentType, { data } = {}) =>
+	new SpriteSoundComponent(data)

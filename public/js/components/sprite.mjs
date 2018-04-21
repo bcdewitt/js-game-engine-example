@@ -1,21 +1,22 @@
-const defaultData = {
-	x: 0,
-	y: 0,
-	width: 0,
-	height: 0,
-	flipped: false,
-	frame: null,
-	layer: null
-}
+import Game from '../js-game-engine/esm/index.mjs'
 
 const _x = Symbol('_x')
 const _y = Symbol('_y')
 const _width = Symbol('_width')
 const _height = Symbol('_height')
 
-class SpriteComponent {
+class SpriteComponent extends Game.Component {
 	constructor(data) {
-		Object.assign(this, defaultData, data)
+		super()
+		Object.assign(this, {
+			x: 0,
+			y: 0,
+			width: 0,
+			height: 0,
+			flipped: false,
+			frame: null,
+			layer: null
+		}, data)
 	}
 
 	get x() {
@@ -53,5 +54,5 @@ class SpriteComponent {
 	}
 }
 
-export default (componentType, { component, data = {} }) =>
-	component.decorate(new SpriteComponent(data))
+export default (componentType, { data = {} }) =>
+	new SpriteComponent(data)
