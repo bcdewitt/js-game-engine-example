@@ -3,15 +3,9 @@ const MAX_SPEED_Y = 4.1
 const GRAVITY = 0.3
 const FRICTION = 0.08
 
-// TODO: Move this to Game?
-const indexComponents = (entities, compNames = []) =>
-	compNames.forEach(compName =>
-		entities.setIndex(compName, entity => entity.getComponent(compName))
-	)
-
 export default async (systemName, { system }) => system
-	.addEventListener('mounted', ({ entities }) => {
-		indexComponents(entities, ['staticPhysicsBody', 'physicsBody'])
+	.addEventListener('mounted', ({ indexComponents }) => {
+		indexComponents(['staticPhysicsBody', 'physicsBody'])
 	})
 
 	.addEventListener('update', ({ entities, deltaTime }) => {

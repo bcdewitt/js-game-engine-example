@@ -1,9 +1,3 @@
-// TODO: Move this to Game?
-const indexComponents = (entities, compNames = []) =>
-	compNames.forEach(compName =>
-		entities.setIndex(compName, entity => entity.getComponent(compName))
-	)
-
 export default async (systemName, { system, tiledMap, entityFactory }) => {
 	const canvas = document.getElementById('game')
 	const context = canvas && canvas.getContext('2d')
@@ -106,8 +100,8 @@ export default async (systemName, { system, tiledMap, entityFactory }) => {
 		})
 
 		// Set up indexes
-		.addEventListener('mounted', ({ entities }) => {
-			indexComponents(entities, [ 'camera', 'sprite' ])
+		.addEventListener('mounted', ({ indexComponents, entities }) => {
+			indexComponents([ 'camera', 'sprite' ])
 			entities.setIndex('player', (entity) => {
 				const comp = entity.getComponent('being')
 				return comp.type !== 'Player' ? undefined : entity

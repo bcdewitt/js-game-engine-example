@@ -1,12 +1,6 @@
-// TODO: Move this to Game?
-const indexComponents = (entities, compNames = []) =>
-	compNames.forEach(compName =>
-		entities.setIndex(compName, entity => entity.getComponent(compName))
-	)
-
 export default async (systemName, { system, entityFactory }) => system
-	.addEventListener('mounted', ({ entities }) => {
-		indexComponents(entities, ['spawner', 'spawned'])
+	.addEventListener('mounted', ({ indexComponents }) => {
+		indexComponents(['spawner', 'spawned'])
 	})
 	.addEventListener('update', ({ entities, currentTarget }) => {
 

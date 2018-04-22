@@ -24,12 +24,6 @@ class TimeOffset {
 	}
 }
 
-// TODO: Move this to Game?
-const indexComponents = (entities, compNames = []) =>
-	compNames.forEach(compName =>
-		entities.setIndex(compName, entity => entity.getComponent(compName))
-	)
-
 export default async (systemName, { system, tiledMap }) => {
 	const context = new AudioContext()
 	const tracks = {}
@@ -76,8 +70,8 @@ export default async (systemName, { system, tiledMap }) => {
 			tracks['bgm'] = await context.decodeAudioData(bgm)
 		})
 
-		.addEventListener('mounted', ({ entities }) => {
-			indexComponents(entities, ['camera', 'sound'])
+		.addEventListener('mounted', ({ indexComponents }) => {
+			indexComponents(['camera', 'sound'])
 		})
 
 		.addEventListener('update', ({ entities }) => {

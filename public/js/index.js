@@ -889,9 +889,10 @@ class GameSceneChangeEvent extends GameEvent {
 }
 
 class SystemMountedEvent extends GameEvent {
-	constructor(type, { entities } = {}) {
+	constructor(type, { entities, indexComponents } = {}) {
 		super(type);
 		Object.defineProperty(this, 'entities', { value: entities, writable: false });
+		Object.defineProperty(this, 'indexComponents', { value: indexComponents, writable: false });
 	}
 }
 
@@ -1050,7 +1051,13 @@ class System extends MixedWith(eventTargetMixin) {
 	 * @returns {this} - Returns self for method chaining.
 	 */
 	mounted(entities) {
-		this.dispatchEvent(new SystemMountedEvent('mounted', { entities }));
+		this.dispatchEvent(new SystemMountedEvent('mounted', {
+			indexComponents: (compNames = []) =>
+				compNames.forEach(compName =>
+					entities.setIndex(compName, entity => entity.getComponent(compName))
+				),
+			entities
+		}));
 		return this
 	}
 
@@ -2215,15 +2222,9 @@ const MAX_SPEED_Y = 4.1;
 const GRAVITY = 0.3;
 const FRICTION = 0.08;
 
-// TODO: Move this to Game?
-const indexComponents = (entities, compNames = []) =>
-	compNames.forEach(compName =>
-		entities.setIndex(compName, entity => entity.getComponent(compName))
-	);
-
 var createPhysicsSystem = async (systemName, { system }) => system
-	.addEventListener('mounted', ({ entities }) => {
-		indexComponents(entities, ['staticPhysicsBody', 'physicsBody']);
+	.addEventListener('mounted', ({ indexComponents }) => {
+		indexComponents(['staticPhysicsBody', 'physicsBody']);
 	})
 
 	.addEventListener('update', ({ entities, deltaTime }) => {
@@ -2297,12 +2298,6 @@ var createPhysicsSystem = async (systemName, { system }) => system
 			});
 		});
 	});
-
-// TODO: Move this to Game?
-const indexComponents$1 = (entities, compNames = []) =>
-	compNames.forEach(compName =>
-		entities.setIndex(compName, entity => entity.getComponent(compName))
-	);
 
 var createRenderSystem = async (systemName, { system, tiledMap, entityFactory }) => {
 	const canvas = document.getElementById('game');
@@ -2406,8 +2401,8 @@ var createRenderSystem = async (systemName, { system, tiledMap, entityFactory })
 		})
 
 		// Set up indexes
-		.addEventListener('mounted', ({ entities }) => {
-			indexComponents$1(entities, [ 'camera', 'sprite' ]);
+		.addEventListener('mounted', ({ indexComponents, entities }) => {
+			indexComponents([ 'camera', 'sprite' ]);
 			entities.setIndex('player', (entity) => {
 				const comp = entity.getComponent('being');
 				return comp.type !== 'Player' ? undefined : entity
@@ -2533,12 +2528,6 @@ class TimeOffset {
 	}
 }
 
-// TODO: Move this to Game?
-const indexComponents$2 = (entities, compNames = []) =>
-	compNames.forEach(compName =>
-		entities.setIndex(compName, entity => entity.getComponent(compName))
-	);
-
 var createSoundSystem = async (systemName, { system, tiledMap }) => {
 	const context = new AudioContext();
 	const tracks = {};
@@ -2585,8 +2574,8 @@ var createSoundSystem = async (systemName, { system, tiledMap }) => {
 			tracks['bgm'] = await context.decodeAudioData(bgm);
 		})
 
-		.addEventListener('mounted', ({ entities }) => {
-			indexComponents$2(entities, ['camera', 'sound']);
+		.addEventListener('mounted', ({ indexComponents }) => {
+			indexComponents(['camera', 'sound']);
 		})
 
 		.addEventListener('update', ({ entities }) => {
@@ -2649,15 +2638,9 @@ var createSoundSystem = async (systemName, { system, tiledMap }) => {
 		})
 };
 
-// TODO: Move this to Game?
-const indexComponents$3 = (entities, compNames = []) =>
-	compNames.forEach(compName =>
-		entities.setIndex(compName, entity => entity.getComponent(compName))
-	);
-
 var createSpawnSystem = async (systemName, { system, entityFactory }) => system
-	.addEventListener('mounted', ({ entities }) => {
-		indexComponents$3(entities, ['spawner', 'spawned']);
+	.addEventListener('mounted', ({ indexComponents }) => {
+		indexComponents(['spawner', 'spawned']);
 	})
 	.addEventListener('update', ({ entities, currentTarget }) => {
 
@@ -3616,9 +3599,10 @@ class GameSceneChangeEvent$1 extends GameEvent$1 {
 }
 
 class SystemMountedEvent$1 extends GameEvent$1 {
-	constructor(type, { entities } = {}) {
+	constructor(type, { entities, indexComponents } = {}) {
 		super(type);
 		Object.defineProperty(this, 'entities', { value: entities, writable: false });
+		Object.defineProperty(this, 'indexComponents', { value: indexComponents, writable: false });
 	}
 }
 
@@ -3777,7 +3761,13 @@ class System$1 extends MixedWith$1(eventTargetMixin$1) {
 	 * @returns {this} - Returns self for method chaining.
 	 */
 	mounted(entities) {
-		this.dispatchEvent(new SystemMountedEvent$1('mounted', { entities }));
+		this.dispatchEvent(new SystemMountedEvent$1('mounted', {
+			indexComponents: (compNames = []) =>
+				compNames.forEach(compName =>
+					entities.setIndex(compName, entity => entity.getComponent(compName))
+				),
+			entities
+		}));
 		return this
 	}
 
