@@ -12,11 +12,11 @@ export default async (systemName, { system, inputManager }) => system
 			const state = playerEntity.getComponent('state')
 			const sprite = playerEntity.getComponent('sprite')
 
-			if (inputManager.leftButton.held) {
+			if (inputManager.leftButton.held && !inputManager.rightButton.held) {
 				c.accX = -0.2
 				state.state = 'driving'
 				sprite.flipped = true
-			} else if (inputManager.rightButton.held) {
+			} else if (inputManager.rightButton.held && !inputManager.leftButton.held) {
 				c.accX = 0.2
 				state.state = 'driving'
 				sprite.flipped = false

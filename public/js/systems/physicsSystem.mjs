@@ -19,7 +19,7 @@ export default async (systemName, { system }) => system
 		const nonstaticComponents = entities.getIndexed('physicsBody')
 
 		// For every nonstatic physics body, check for static physics body collision
-		for (const c of nonstaticComponents) {
+		nonstaticComponents.forEach((c) => {
 			const state = c.getParentEntity().getComponent('state')
 			const wasGrounded = state.grounded
 			state.grounded = false // Only set to true after a collision is detected
@@ -41,7 +41,7 @@ export default async (systemName, { system }) => system
 			c.x += c.spdX
 			c.y += c.spdY
 
-			for (const c2 of staticComponents) {
+			staticComponents.forEach((c2) => {
 				const halfWidthSum = c.halfWidth + c2.halfWidth
 				const halfHeightSum = c.halfHeight + c2.halfHeight
 				const deltaX = c2.midPointX - c.midPointX
@@ -82,6 +82,6 @@ export default async (systemName, { system }) => system
 						if (c.spdX < 0 && deltaX < 0) c.spdX = 0
 					}
 				}
-			}
-		}
+			})
+		})
 	})

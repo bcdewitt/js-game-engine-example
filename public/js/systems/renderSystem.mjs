@@ -86,19 +86,22 @@ export default async (systemName, { system, tiledMap, entityFactory }) => {
 				mapY: 820,
 				mapWidth: parseInt(canvas.width / 8),
 				mapHeight: parseInt(canvas.height / 8),
-				following: null
+				followPlayer: true
 			}))
+
 			/*
-			currentTarget.addEntity('Camera', {
-				x: canvas.width / 2,
+			// Uncomment this to add a smaller camera at the top
+			currentTarget.addEntity(entityFactory.create('Camera', {
+				x: canvas.width - canvas.width / 4, // Matching width
 				y: 0,
-				width: canvas.width / 2,
-				height: canvas.height,
+				width: canvas.width / 4,
+				height: canvas.height / 4,
 				mapX: 100,
 				mapY: 920,
 				mapWidth: canvas.width / 2,
-				mapHeight: canvas.height / 2
-			})
+				mapHeight: canvas.height / 2,
+				followPlayer: false
+			}))
 			*/
 		})
 
@@ -115,11 +118,10 @@ export default async (systemName, { system, tiledMap, entityFactory }) => {
 		.addEventListener('update', ({ entities, timestamp }) => {
 			context.clearRect(0, 0, canvas.width, canvas.height)
 
-			const [ defaultPlayerEntity ] = entities.getIndexed('player')
+			const [ defaultPlayerEntity ] = entities.getIndexed('player').values()
 
 			// Get each camera
-			const cameraComponents = entities.getIndexed('camera')
-			for (const c of cameraComponents) {
+			entities.getIndexed('camera').forEach((c) => {
 
 				// Set up drawing layers
 				const layers = {
@@ -129,7 +131,7 @@ export default async (systemName, { system, tiledMap, entityFactory }) => {
 				}
 
 				// Force camera to match followed entity
-				if (!c.following) {
+				if (c.followPlayer && !c.following) {
 					c.following = defaultPlayerEntity
 				}
 
@@ -147,8 +149,7 @@ export default async (systemName, { system, tiledMap, entityFactory }) => {
 				}
 
 				// Get entities with a sprite component and add to the appropriate layer for rendering
-				const spriteComponents = entities.getIndexed('sprite')
-				for (const sprite of spriteComponents) {
+				entities.getIndexed('sprite').forEach((sprite) => {
 					const frame = frames[sprite.frame]
 					const img = !sprite.flipped ? images[frame.img] : flippedImages[frame.img]
 
@@ -171,7 +172,7 @@ export default async (systemName, { system, tiledMap, entityFactory }) => {
 					) {
 						layers[sprite.layer].sprites.push(obj)
 					}
-				}
+				})
 
 				// Draw each map layer (include all sprites for that layer)
 				for (const layerKey in layers) {
@@ -202,6 +203,6 @@ export default async (systemName, { system, tiledMap, entityFactory }) => {
 						context.drawImage(tempCanvas, 0, 0, mapWidth, mapHeight, x, y, width, height)
 					}
 				}
-			}
+			})
 		})
 }

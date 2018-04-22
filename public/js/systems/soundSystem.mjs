@@ -88,8 +88,7 @@ export default async (systemName, { system, tiledMap }) => {
 				playSound('bgm', 0, bgmLoopTarget)
 			}
 
-			const soundComponents = entities.getIndexed('sound')
-			for (const c of soundComponents) {
+			entities.getIndexed('sound').forEach((c) => {
 				const soundEntity = c.getParentEntity()
 				const state = soundEntity.getComponent('state')
 
@@ -105,8 +104,7 @@ export default async (systemName, { system, tiledMap }) => {
 				// Determine distance from soundEntity to cameraCenter
 				let distanceToCamCenter = 0
 				let radius = 0
-				const cameraComponents = entities.getIndexed('camera')
-				for (const cam of cameraComponents) {
+				entities.getIndexed('camera').forEach((cam) => {
 					const a = (c.x - cam.mapCenterX)
 					const b = (c.y - cam.mapCenterY)
 					const currentDist = Math.sqrt((a*a) + (b*b))
@@ -119,7 +117,7 @@ export default async (systemName, { system, tiledMap }) => {
 					radius = !radius ?
 						currentRad :
 						Math.min(radius, currentRad)
-				}
+				})
 
 				// Play
 				if (c.play && c.src) {
@@ -138,7 +136,6 @@ export default async (systemName, { system, tiledMap }) => {
 						c.gainNode.gain.setValueAtTime(calc, 0)
 					}
 				}
-
-			}
+			})
 		})
 }
