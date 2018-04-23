@@ -7,6 +7,7 @@ import createSpritePhysics from './components/spritePhysics.mjs'
 import createSpriteSound from './components/spriteSound.mjs'
 import createBeing from './components/being.mjs'
 import createState from './components/state.mjs'
+import createHealth from './components/health.mjs'
 
 export default (componentFactory) => componentFactory
 	.set('camera', createCamera)
@@ -18,3 +19,4 @@ export default (componentFactory) => componentFactory
 	.set('spriteSound', createSpriteSound)
 	.set('being', createBeing)
 	.set('state', createState)
+	.set('health', createHealth)

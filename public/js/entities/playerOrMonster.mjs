@@ -1,5 +1,6 @@
 export default (entityType, { entity, componentFactory, data: { spawnerSource, x, y, width, height } } = {}) =>
 	entity
+		.setComponent('health', componentFactory.create('health', { maxHP: 80 }))
 		.setComponent('spawned', componentFactory.create('spawned', { spawnerSource }))
 		.setComponent('state', componentFactory.create('state', { initialState: 'idle' }))
 		.setComponent('being', componentFactory.create('being', { type: entityType }))

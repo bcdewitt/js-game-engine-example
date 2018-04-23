@@ -8,11 +8,10 @@ export default async (systemName, { system }) => system
 		indexComponents(['staticPhysicsBody', 'physicsBody'])
 	})
 
-	.addEventListener('update', ({ entities, deltaTime }) => {
+	.addEventListener('update', ({ entities, deltaTime, timestamp }) => {
 		const staticComponents = entities.getIndexed('staticPhysicsBody')
 		const nonstaticComponents = entities.getIndexed('physicsBody')
 
-		// For every nonstatic physics body, check for static physics body collision
 		nonstaticComponents.forEach((c) => {
 			const state = c.getParentEntity().getComponent('state')
 			const wasGrounded = state.grounded
@@ -35,6 +34,7 @@ export default async (systemName, { system }) => system
 			c.x += c.spdX
 			c.y += c.spdY
 
+			// Check for static physics body collision
 			staticComponents.forEach((c2) => {
 				const halfWidthSum = c.halfWidth + c2.halfWidth
 				const halfHeightSum = c.halfHeight + c2.halfHeight
@@ -74,6 +74,41 @@ export default async (systemName, { system }) => system
 						c.x += projectionX // Apply "projection vector" to rect1
 						if (c.spdX > 0 && deltaX > 0) c.spdX = 0
 						if (c.spdX < 0 && deltaX < 0) c.spdX = 0
+					}
+				}
+			})
+
+			// Check for non-static physics body collision
+			nonstaticComponents.forEach((c2) => {
+				const halfWidthSum = c.halfWidth + c2.halfWidth
+				const halfHeightSum = c.halfHeight + c2.halfHeight
+				const absDeltaX = Math.abs(c2.midPointX - c.midPointX)
+				const absDeltaY = Math.abs(c2.midPointY - c.midPointY)
+
+				// Collision Detection
+				if (
+					(halfWidthSum > absDeltaX) &&
+					(halfHeightSum > absDeltaY)
+				) {
+					const entity1 = c.getParentEntity()
+					const entity2 = c2.getParentEntity()
+					const c1Type = entity1.getComponent('being').type
+					const c2Type = entity2.getComponent('being').type
+
+					// Figure out if the collision was Player <-> Monster and which entity is the Player
+					let playerEntity
+					if (c1Type === 'Monster' && c2Type === 'Player') {
+						playerEntity = entity2
+					} else if (c2Type === 'Monster' && c1Type === 'Player') {
+						playerEntity = entity1
+					} else {
+						return
+					}
+
+					const playerHealth = playerEntity.getComponent('health')
+					if (playerHealth.damagedTimestamp === null || timestamp - playerHealth.damagedTimestamp > 1000) {
+						playerHealth.damagedTimestamp = timestamp
+						playerHealth.hp = Math.max(playerHealth.hp - 10, 0)
 					}
 				}
 			})

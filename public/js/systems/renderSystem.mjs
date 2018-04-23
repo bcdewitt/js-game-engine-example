@@ -46,7 +46,7 @@ export default async (systemName, { system, tiledMap, entityFactory }) => {
 
 		// Queue assets
 		.addEventListener('load', async ({ assetFetcher }) => {
-			assetFetcher.queueAssets([ 'img/monster.png', 'img/tankSheet.png' ])
+			assetFetcher.queueAssets([ 'img/monster.png', 'img/tankSheet.png', 'img/healthMeter.png' ])
 		})
 
 		// Gather downloaded assets
@@ -54,6 +54,7 @@ export default async (systemName, { system, tiledMap, entityFactory }) => {
 			images = {
 				'img/monster.png': assets.get('img/monster.png'),
 				'img/tankSheet.png': assets.get('img/tankSheet.png'),
+				'img/healthMeter.png': assets.get('img/healthMeter.png'),
 			}
 
 			// Images must be flipped and stored in flippedImages under same key
@@ -192,6 +193,17 @@ export default async (systemName, { system, tiledMap, entityFactory }) => {
 						for(let sprite of layer.sprites) {
 							tempCtx.drawImage(sprite.img, parseInt(sprite.sx), parseInt(sprite.sy), parseInt(sprite.width), parseInt(sprite.height), Math.round(sprite.x), Math.round(sprite.y), parseInt(sprite.width), parseInt(sprite.height))
 						}
+
+						// Health bar
+						const health = defaultPlayerEntity.getComponent('health')
+						const hp = Math.max(health.hp, 0)
+						const barHeight = 32
+						const barTop = mapHeight - 48 - 20
+						const barBottom = barTop + barHeight + 1
+						const barY = barBottom - (hp / health.maxHP * barHeight)
+						tempCtx.fillStyle = 'white'
+						tempCtx.fillRect(10, barY, 8, barBottom - barY)
+						tempCtx.drawImage(images['img/healthMeter.png'], 10, barTop)
 
 						// Draw the temporary canvas to the main canvas (position and fit to camera bounds)
 						context.drawImage(tempCanvas, 0, 0, mapWidth, mapHeight, x, y, width, height)

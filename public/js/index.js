@@ -228,6 +228,44 @@ class GameEvent {
 
 const _eventTargetMixin = new WeakMap();
 
+const _dispatchEvent = function(e, isAsync = false) {
+	// Prevent duplicate events during propagation
+	if (propagatingEvent && propagatingEvent.currentTarget === this) return
+
+	const _this = _eventTargetMixin.get(this);
+	const _event = _GameEvent.get(e);
+
+	// Modify event's private properties
+	if (_event.target === null) {
+		_event.timestamp = performance.now();
+		_event.target = this;
+	}
+	_event.currentTarget = this;
+
+	// Loop over listeners (break out when e.stopImmediatePropagation() is called)
+	const collection = _this.listeners.get(e.type);
+	const results = [];
+	if (collection) {
+		for (const listener of collection.values()) {
+			const options = _this.listenerOptions.get(listener);
+			results.push(listener.call(this, e));
+			if (options && options.once) this.removeEventListener(e.type, listener);
+			if (!_event.propagateImmediate) break
+		}
+	}
+
+	// If this event propagates, dispatch event on parent
+	if (_event.propagate && _this.parent) {
+		propagatingEvent = e;
+		const methodName = isAsync ? 'dispatchEventAsync' : 'dispatchEvent';
+		results.push(_this.parent[methodName](e));
+	} else {
+		propagatingEvent = null;
+	}
+
+	return results
+};
+
 /**
  * Event Target mixin
  *
@@ -252,40 +290,7 @@ const eventTargetMixin = {
 	 * @param {GameEvent} e - Event to dispatch.
 	 */
 	async dispatchEventAsync(e) {
-		// TODO: DRY this up by using shared code between this and .dispatchEvent()
-
-		// Prevent duplicate events during propagation
-		if (propagatingEvent && propagatingEvent.currentTarget === this) return
-
-		const _this = _eventTargetMixin.get(this);
-		const _event = _GameEvent.get(e);
-
-		// Modify event's private properties
-		if (_event.target === null) {
-			_event.timestamp = performance.now();
-			_event.target = this;
-		}
-		_event.currentTarget = this;
-
-		// Loop over listeners (break out when e.stopImmediatePropagation() is called)
-		const collection = _this.listeners.get(e.type);
-		const promises = [];
-		if (collection) {
-			for (const listener of collection.values()) {
-				const options = _this.listenerOptions.get(listener);
-				promises.push(listener.call(this, e));
-				if (options && options.once) this.removeEventListener(e.type, listener);
-				if (!_event.propagateImmediate) break
-			}
-		}
-
-		// If this event propagates, dispatch event on parent
-		if (_event.propagate && _this.parent) {
-			propagatingEvent = e;
-			promises.push(_this.parent.dispatchEventAsync(e));
-		} else {
-			propagatingEvent = null;
-		}
+		const promises = _dispatchEvent.call(this, e, true);
 		await Promise.all(promises);
 	},
 
@@ -297,37 +302,7 @@ const eventTargetMixin = {
 	 * @returns {this} - Returns self for method chaining.
 	 */
 	dispatchEvent(e) {
-		// Prevent duplicate events during propagation
-		if (propagatingEvent && propagatingEvent.currentTarget === this) return
-
-		const _this = _eventTargetMixin.get(this);
-		const _event = _GameEvent.get(e);
-
-		// Modify event's private properties
-		if (_event.target === null) {
-			_event.timestamp = performance.now();
-			_event.target = this;
-		}
-		_event.currentTarget = this;
-
-		// Loop over listeners (break out when e.stopImmediatePropagation() is called)
-		const collection = _this.listeners.get(e.type);
-		if (collection) {
-			for (const listener of collection.values()) {
-				const options = _this.listenerOptions.get(listener);
-				listener.call(this, e);
-				if (options && options.once) this.removeEventListener(e.type, listener);
-				if (!_event.propagateImmediate) break
-			}
-		}
-
-		// If this event propagates, dispatch event on parent
-		if (_event.propagate && _this.parent) {
-			propagatingEvent = e;
-			_this.parent.dispatchEvent(e);
-		} else {
-			propagatingEvent = null;
-		}
+		_dispatchEvent.call(this, e);
 		return this
 	},
 
@@ -2227,11 +2202,10 @@ var createPhysicsSystem = async (systemName, { system }) => system
 		indexComponents(['staticPhysicsBody', 'physicsBody']);
 	})
 
-	.addEventListener('update', ({ entities, deltaTime }) => {
+	.addEventListener('update', ({ entities, deltaTime, timestamp }) => {
 		const staticComponents = entities.getIndexed('staticPhysicsBody');
 		const nonstaticComponents = entities.getIndexed('physicsBody');
 
-		// For every nonstatic physics body, check for static physics body collision
 		nonstaticComponents.forEach((c) => {
 			const state = c.getParentEntity().getComponent('state');
 			const wasGrounded = state.grounded;
@@ -2254,6 +2228,7 @@ var createPhysicsSystem = async (systemName, { system }) => system
 			c.x += c.spdX;
 			c.y += c.spdY;
 
+			// Check for static physics body collision
 			staticComponents.forEach((c2) => {
 				const halfWidthSum = c.halfWidth + c2.halfWidth;
 				const halfHeightSum = c.halfHeight + c2.halfHeight;
@@ -2293,6 +2268,41 @@ var createPhysicsSystem = async (systemName, { system }) => system
 						c.x += projectionX; // Apply "projection vector" to rect1
 						if (c.spdX > 0 && deltaX > 0) c.spdX = 0;
 						if (c.spdX < 0 && deltaX < 0) c.spdX = 0;
+					}
+				}
+			});
+
+			// Check for non-static physics body collision
+			nonstaticComponents.forEach((c2) => {
+				const halfWidthSum = c.halfWidth + c2.halfWidth;
+				const halfHeightSum = c.halfHeight + c2.halfHeight;
+				const absDeltaX = Math.abs(c2.midPointX - c.midPointX);
+				const absDeltaY = Math.abs(c2.midPointY - c.midPointY);
+
+				// Collision Detection
+				if (
+					(halfWidthSum > absDeltaX) &&
+					(halfHeightSum > absDeltaY)
+				) {
+					const entity1 = c.getParentEntity();
+					const entity2 = c2.getParentEntity();
+					const c1Type = entity1.getComponent('being').type;
+					const c2Type = entity2.getComponent('being').type;
+
+					// Figure out if the collision was Player <-> Monster and which entity is the Player
+					let playerEntity;
+					if (c1Type === 'Monster' && c2Type === 'Player') {
+						playerEntity = entity2;
+					} else if (c2Type === 'Monster' && c1Type === 'Player') {
+						playerEntity = entity1;
+					} else {
+						return
+					}
+
+					const playerHealth = playerEntity.getComponent('health');
+					if (playerHealth.damagedTimestamp === null || timestamp - playerHealth.damagedTimestamp > 1000) {
+						playerHealth.damagedTimestamp = timestamp;
+						playerHealth.hp = Math.max(playerHealth.hp - 10, 0);
 					}
 				}
 			});
@@ -2347,7 +2357,7 @@ var createRenderSystem = async (systemName, { system, tiledMap, entityFactory })
 
 		// Queue assets
 		.addEventListener('load', async ({ assetFetcher }) => {
-			assetFetcher.queueAssets([ 'img/monster.png', 'img/tankSheet.png' ]);
+			assetFetcher.queueAssets([ 'img/monster.png', 'img/tankSheet.png', 'img/healthMeter.png' ]);
 		})
 
 		// Gather downloaded assets
@@ -2355,6 +2365,7 @@ var createRenderSystem = async (systemName, { system, tiledMap, entityFactory })
 			images = {
 				'img/monster.png': assets.get('img/monster.png'),
 				'img/tankSheet.png': assets.get('img/tankSheet.png'),
+				'img/healthMeter.png': assets.get('img/healthMeter.png'),
 			};
 
 			// Images must be flipped and stored in flippedImages under same key
@@ -2493,6 +2504,17 @@ var createRenderSystem = async (systemName, { system, tiledMap, entityFactory })
 						for(let sprite of layer.sprites) {
 							tempCtx.drawImage(sprite.img, parseInt(sprite.sx), parseInt(sprite.sy), parseInt(sprite.width), parseInt(sprite.height), Math.round(sprite.x), Math.round(sprite.y), parseInt(sprite.width), parseInt(sprite.height));
 						}
+
+						// Health bar
+						const health = defaultPlayerEntity.getComponent('health');
+						const hp = Math.max(health.hp, 0);
+						const barHeight = 32;
+						const barTop = mapHeight - 48 - 20;
+						const barBottom = barTop + barHeight + 1;
+						const barY = barBottom - (hp / health.maxHP * barHeight);
+						tempCtx.fillStyle = 'white';
+						tempCtx.fillRect(10, barY, 8, barBottom - barY);
+						tempCtx.drawImage(images['img/healthMeter.png'], 10, barTop);
 
 						// Draw the temporary canvas to the main canvas (position and fit to camera bounds)
 						context.drawImage(tempCanvas, 0, 0, mapWidth, mapHeight, x, y, width, height);
@@ -2938,6 +2960,44 @@ class GameEvent$1 {
 
 const _eventTargetMixin$1 = new WeakMap();
 
+const _dispatchEvent$1 = function(e, isAsync = false) {
+	// Prevent duplicate events during propagation
+	if (propagatingEvent$1 && propagatingEvent$1.currentTarget === this) return
+
+	const _this = _eventTargetMixin$1.get(this);
+	const _event = _GameEvent$1.get(e);
+
+	// Modify event's private properties
+	if (_event.target === null) {
+		_event.timestamp = performance.now();
+		_event.target = this;
+	}
+	_event.currentTarget = this;
+
+	// Loop over listeners (break out when e.stopImmediatePropagation() is called)
+	const collection = _this.listeners.get(e.type);
+	const results = [];
+	if (collection) {
+		for (const listener of collection.values()) {
+			const options = _this.listenerOptions.get(listener);
+			results.push(listener.call(this, e));
+			if (options && options.once) this.removeEventListener(e.type, listener);
+			if (!_event.propagateImmediate) break
+		}
+	}
+
+	// If this event propagates, dispatch event on parent
+	if (_event.propagate && _this.parent) {
+		propagatingEvent$1 = e;
+		const methodName = isAsync ? 'dispatchEventAsync' : 'dispatchEvent';
+		results.push(_this.parent[methodName](e));
+	} else {
+		propagatingEvent$1 = null;
+	}
+
+	return results
+};
+
 /**
  * Event Target mixin
  *
@@ -2962,40 +3022,7 @@ const eventTargetMixin$1 = {
 	 * @param {GameEvent} e - Event to dispatch.
 	 */
 	async dispatchEventAsync(e) {
-		// TODO: DRY this up by using shared code between this and .dispatchEvent()
-
-		// Prevent duplicate events during propagation
-		if (propagatingEvent$1 && propagatingEvent$1.currentTarget === this) return
-
-		const _this = _eventTargetMixin$1.get(this);
-		const _event = _GameEvent$1.get(e);
-
-		// Modify event's private properties
-		if (_event.target === null) {
-			_event.timestamp = performance.now();
-			_event.target = this;
-		}
-		_event.currentTarget = this;
-
-		// Loop over listeners (break out when e.stopImmediatePropagation() is called)
-		const collection = _this.listeners.get(e.type);
-		const promises = [];
-		if (collection) {
-			for (const listener of collection.values()) {
-				const options = _this.listenerOptions.get(listener);
-				promises.push(listener.call(this, e));
-				if (options && options.once) this.removeEventListener(e.type, listener);
-				if (!_event.propagateImmediate) break
-			}
-		}
-
-		// If this event propagates, dispatch event on parent
-		if (_event.propagate && _this.parent) {
-			propagatingEvent$1 = e;
-			promises.push(_this.parent.dispatchEventAsync(e));
-		} else {
-			propagatingEvent$1 = null;
-		}
+		const promises = _dispatchEvent$1.call(this, e, true);
 		await Promise.all(promises);
 	},
 
@@ -3007,37 +3034,7 @@ const eventTargetMixin$1 = {
 	 * @returns {this} - Returns self for method chaining.
 	 */
 	dispatchEvent(e) {
-		// Prevent duplicate events during propagation
-		if (propagatingEvent$1 && propagatingEvent$1.currentTarget === this) return
-
-		const _this = _eventTargetMixin$1.get(this);
-		const _event = _GameEvent$1.get(e);
-
-		// Modify event's private properties
-		if (_event.target === null) {
-			_event.timestamp = performance.now();
-			_event.target = this;
-		}
-		_event.currentTarget = this;
-
-		// Loop over listeners (break out when e.stopImmediatePropagation() is called)
-		const collection = _this.listeners.get(e.type);
-		if (collection) {
-			for (const listener of collection.values()) {
-				const options = _this.listenerOptions.get(listener);
-				listener.call(this, e);
-				if (options && options.once) this.removeEventListener(e.type, listener);
-				if (!_event.propagateImmediate) break
-			}
-		}
-
-		// If this event propagates, dispatch event on parent
-		if (_event.propagate && _this.parent) {
-			propagatingEvent$1 = e;
-			_this.parent.dispatchEvent(e);
-		} else {
-			propagatingEvent$1 = null;
-		}
+		_dispatchEvent$1.call(this, e);
 		return this
 	},
 
@@ -5166,6 +5163,20 @@ class StateComponent extends game$1.Component {
 var createState = (componentType, { data: { initialState } } = {}) =>
 	new StateComponent(initialState);
 
+class HealthComponent extends game$1.Component {
+	constructor({ maxHP }) {
+		super();
+		Object.assign(this, {
+			maxHP,
+			hp: maxHP,
+			damagedTimestamp: performance.now(),
+		});
+	}
+}
+
+var createHealth = (componentType, { data } = {}) =>
+	new HealthComponent(data);
+
 var buildComponentFactory = (componentFactory) => componentFactory
 	.set('camera', createCamera)
 	.set('staticPhysicsBody', createStaticPhysicsBody)
@@ -5175,7 +5186,8 @@ var buildComponentFactory = (componentFactory) => componentFactory
 	.set('spritePhysics', createSpritePhysics)
 	.set('spriteSound', createSpriteSound)
 	.set('being', createBeing)
-	.set('state', createState);
+	.set('state', createState)
+	.set('health', createHealth);
 
 var createCamera$1 = (entityType, { componentFactory, entity, data } = {}) =>
 	entity.setComponent('camera', componentFactory.create('camera', data));
@@ -5195,6 +5207,7 @@ var createEntitySpawner = (entityType, { entity, componentFactory, data }) => {
 
 var createPlayerOrMonster = (entityType, { entity, componentFactory, data: { spawnerSource, x, y, width, height } } = {}) =>
 	entity
+		.setComponent('health', componentFactory.create('health', { maxHP: 80 }))
 		.setComponent('spawned', componentFactory.create('spawned', { spawnerSource }))
 		.setComponent('state', componentFactory.create('state', { initialState: 'idle' }))
 		.setComponent('being', componentFactory.create('being', { type: entityType }))
