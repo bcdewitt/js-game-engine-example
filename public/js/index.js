@@ -2209,6 +2209,10 @@ var createPhysicsSystem = async (systemName, { system }) => system
 		nonstaticComponents.forEach((c) => {
 			const state = c.getParentEntity().getComponent('state');
 			const wasGrounded = state.grounded;
+			const wasWallCollided = state.wallCollided;
+			const wasAtEdge = state.atEdge;
+			state.wallCollided = false;
+			state.atEdge = false;
 			state.grounded = false; // Only set to true after a collision is detected
 
 			c.accY = GRAVITY; // Add gravity (limit to 10)
@@ -2250,24 +2254,35 @@ var createPhysicsSystem = async (systemName, { system }) => system
 						if (deltaY > 0) projectionY *= -1;
 
 						c.y += projectionY; // Apply "projection vector" to rect1
-						if (c.spdY > 0 && deltaY > 0) c.spdY = 0;
-						if (c.spdY < 0 && deltaY < 0) c.spdY = 0;
+						if (c.spdY > 0 && deltaY > 0 || c.spdY < 0 && deltaY < 0) c.spdY = 0;
 
 						if (projectionY < 0) {
-							if (!wasGrounded) { state.groundHit = true; } else { state.groundHit = false; }
+							state.groundHit = !wasGrounded;
 							state.grounded = true;
-							if (c.spdX > 0) {
-								c.spdX = Math.max(c.spdX - (FRICTION / time), 0);
-							} else {
-								c.spdX = Math.min(c.spdX + (FRICTION / time), 0);
-							}
+							c.spdX = c.spdX > 0
+								? Math.max(c.spdX - (FRICTION / time), 0)
+								: Math.min(c.spdX + (FRICTION / time), 0);
 						}
 					} else {
 						if (deltaX > 0) projectionX *= -1;
 
 						c.x += projectionX; // Apply "projection vector" to rect1
-						if (c.spdX > 0 && deltaX > 0) c.spdX = 0;
-						if (c.spdX < 0 && deltaX < 0) c.spdX = 0;
+						if (c.spdX > 0 && deltaX > 0 || c.spdX < 0 && deltaX < 0) c.spdX = 0;
+						state.wallCollided = !wasAtEdge && !wasWallCollided;
+					}
+
+					// Edge Detection
+					if (state.grounded) {
+						const edgeAbsDeltaX = absDeltaX + c.width;
+						const edgeAbsDeltaY = absDeltaY - 1;
+						if (
+							!(
+								(halfWidthSum > edgeAbsDeltaX) &&
+								(halfHeightSum > edgeAbsDeltaY)
+							)
+						) {
+							state.atEdge = !wasAtEdge && !wasWallCollided;
+						}
 					}
 				}
 			});
@@ -2317,9 +2332,21 @@ var createRenderSystem = async (systemName, { system, tiledMap, entityFactory })
 		{
 			img: 'img/monster.png',
 			x: 0,
-			y: 0,
+			y: 1,
 			width: 14,
-			height: 26
+			height: 23
+		}, {
+			img: 'img/monster.png',
+			x: 16,
+			y: 0,
+			width: 13,
+			height: 24
+		}, {
+			img: 'img/monster.png',
+			x: 32,
+			y: 1,
+			width: 15,
+			height: 23
 		}, {
 			img: 'img/tankSheet.png',
 			x: 0,
@@ -2395,8 +2422,7 @@ var createRenderSystem = async (systemName, { system, tiledMap, entityFactory })
 				followPlayer: true
 			}));
 
-			/*
-			// Uncomment this to add a smaller camera at the top
+			// Add a smaller camera at the top
 			currentTarget.addEntity(entityFactory.create('Camera', {
 				x: canvas.width - canvas.width / 4, // Matching width
 				y: 0,
@@ -2406,9 +2432,8 @@ var createRenderSystem = async (systemName, { system, tiledMap, entityFactory })
 				mapY: 920,
 				mapWidth: canvas.width / 2,
 				mapHeight: canvas.height / 2,
-				followPlayer: false
-			}))
-			*/
+				followPlayer: true
+			}));
 		})
 
 		// Set up indexes
@@ -2468,7 +2493,7 @@ var createRenderSystem = async (systemName, { system, tiledMap, entityFactory })
 						y: sprite.y - c.mapY,
 						width: frame.width,
 						height: frame.height,
-						sx: frame.x,
+						sx: !sprite.flipped ? frame.x : img.width - frame.x - frame.width,
 						sy: frame.y
 					};
 
@@ -2691,15 +2716,22 @@ var createSpawnSystem = async (systemName, { system, entityFactory }) => system
 		);
 	});
 
+// For animation and input handling
+
 var createUpdateSystem = async (systemName, { system, inputManager }) => system
 	.addEventListener('mounted', ({ entities }) => {
 		entities.setIndex('player', (entity) => {
 			const comp = entity.getComponent('being');
 			return comp && comp.type === 'Player' ? entity : undefined
 		});
+
+		entities.setIndex('monster', (entity) => {
+			const comp = entity.getComponent('being');
+			return comp && comp.type === 'Monster' ? entity : undefined
+		});
 	})
 
-	.addEventListener('update', ({ entities }) => {
+	.addEventListener('update', ({ entities, timestamp }) => {
 		entities.getIndexed('player').forEach((playerEntity) => {
 			const c = playerEntity.getComponent('physicsBody');
 			const state = playerEntity.getComponent('state');
@@ -2718,20 +2750,68 @@ var createUpdateSystem = async (systemName, { system, inputManager }) => system
 				if (c.spdX === 0) state.state = 'idle';
 			}
 
-			if (state.state === 'driving') {
-				sprite.frame = (parseInt(c.x / 6) % 4) + 1;
-			}
-
 			if (inputManager.jumpButton.pressed && state.grounded) { c.spdY = -100; }
+
+			// Animate tank
+			if (state.state === 'driving') {
+				// (When flipped, the wheels rotate the opposite direction)
+				const rotation = parseInt(c.x / 6) % 4;
+				const frameNum = sprite.flipped ? 3 - rotation : rotation;
+				sprite.frame = frameNum + 3;
+			}
+		});
+
+		// Sawtooth algorithm
+		const bounce = (n, max) => {
+			max -= 1;
+			const upswing = n % (max * 2) >= max;
+			const mod = n % max;
+			return upswing ? max - mod : mod
+		};
+
+		// Animate monsters
+		entities.getIndexed('monster').forEach((monsterEntity) => {
+			const sprite = monsterEntity.getComponent('sprite');
+			sprite.frame = bounce(parseInt(timestamp / 200), 3);
+		});
+	});
+
+// For animation and input handling
+
+var createAiSystem = async (systemName, { system }) => system
+	.addEventListener('mounted', ({ indexComponents }) => {
+		indexComponents(['ai', 'sprite', 'physicsBody', 'state']);
+	})
+
+	.addEventListener('update', ({ entities }) => {
+		entities.getIndexed('ai').forEach((aiComponent) => {
+			if (aiComponent.type === 'Basic' && aiComponent.state === 'Roaming') {
+				const entity = aiComponent.getParentEntity();
+				const sprite = entity.getComponent('sprite');
+				const spritePhysics = entity.getComponent('physicsBody');
+				const state = entity.getComponent('state');
+
+				// Turn around at an edge
+				if (state.wallCollided || state.atEdge) {
+					sprite.flipped = !sprite.flipped;
+
+					// Move far enough away from edge to no longer be "atEdge"
+					sprite.x += (sprite.flipped ? 2 : -2);
+				}
+
+				// Move forward (opposite direction when the sprite is flipped)
+				spritePhysics.spdX = (sprite.flipped ? .75 : -.75);
+			}
 		});
 	});
 
 var buildSystemFactory = (systemFactory) => systemFactory
+	.set('spawn', createSpawnSystem)
+	.set('ai', createAiSystem)
+	.set('update', createUpdateSystem)
 	.set('physics', createPhysicsSystem)
 	.set('render', createRenderSystem)
-	.set('sound', createSoundSystem)
-	.set('spawn', createSpawnSystem)
-	.set('update', createUpdateSystem);
+	.set('sound', createSoundSystem);
 
 /**
  * A class that extends Map with partial implementations of common Array
@@ -5006,7 +5086,7 @@ class SpriteComponent extends game$1.Component {
 			height: 0,
 			flipped: false,
 			frame: null,
-			layer: null
+			layer: null,
 		}, data);
 	}
 
@@ -5061,6 +5141,8 @@ class SpritePhysicsComponent extends game$1.Component {
 		this.spdY = 0;
 	}
 	get [_spriteComp]() { return this[_entity].getComponent('sprite') }
+	get flipped() { this[_spriteComp].flipped; }
+	set flipped(val) { this[_spriteComp].flipped = val; }
 	get x() { return this[_spriteComp].x }
 	set x(val) { this[_spriteComp].x = val; }
 	get y() { return this[_spriteComp].y }
@@ -5146,6 +5228,8 @@ class StateComponent extends game$1.Component {
 			lastUpdate: null,
 			grounded: false,
 			groundHit: false,
+			wallCollided: false,
+			atEdge: false,
 		});
 		this[_state] = initialState;
 	}
@@ -5177,7 +5261,19 @@ class HealthComponent extends game$1.Component {
 var createHealth = (componentType, { data } = {}) =>
 	new HealthComponent(data);
 
+class AiComponent extends game$1.Component {
+	constructor(type = 'Basic') {
+		super();
+		this.type = type;
+		this.state = 'Roaming';
+	}
+}
+
+var createAi = (componentType, { data: { type } } = {}) =>
+	new AiComponent(type);
+
 var buildComponentFactory = (componentFactory) => componentFactory
+	.set('ai', createAi)
 	.set('camera', createCamera)
 	.set('staticPhysicsBody', createStaticPhysicsBody)
 	.set('spawner', createSpawner)
@@ -5205,7 +5301,7 @@ var createEntitySpawner = (entityType, { entity, componentFactory, data }) => {
 	return entity.setComponent('spawner', componentFactory.create('spawner', data))
 };
 
-var createPlayerOrMonster = (entityType, { entity, componentFactory, data: { spawnerSource, x, y, width, height } } = {}) =>
+var createPlayerOrMonster = (entityType, { entity, componentFactory, data: { spawnerSource, x, y, width, height } } = {}) => {
 	entity
 		.setComponent('health', componentFactory.create('health', { maxHP: 80 }))
 		.setComponent('spawned', componentFactory.create('spawned', { spawnerSource }))
@@ -5213,11 +5309,17 @@ var createPlayerOrMonster = (entityType, { entity, componentFactory, data: { spa
 		.setComponent('being', componentFactory.create('being', { type: entityType }))
 		.setComponent('sprite', componentFactory.create('sprite', {
 			x, y, width, height,
-			frame: (entityType === 'Player' ? 1 : 0),
+			frame: (entityType === 'Player' ? 3 : 0),
 			layer: (entityType === 'Player' ? 'Player' : 'Platforms'),
+			flipped: entityType !== 'Player'
 		}))
 		.setComponent('physicsBody', componentFactory.create('spritePhysics', { entity }))
 		.setComponent('sound', componentFactory.create('spriteSound', { src: null, entity }));
+
+	if (entityType !== 'Player') entity.setComponent('ai', componentFactory.create('ai'));
+
+	return entity
+};
 
 var buildEntityFactory = (entityFactory) => entityFactory
 	.use((entityName, obj) => {
@@ -5233,6 +5335,7 @@ var buildEntityFactory = (entityFactory) => entityFactory
 
 var createLevel1 = async (sceneName, { scene, systemFactory, entityFactory, tiledMap }) => scene
 	.setSystem('spawn', await systemFactory.create('spawn'))
+	.setSystem('ai', await systemFactory.create('ai'))
 	.setSystem('update', await systemFactory.create('update'))
 	.setSystem('physics', await systemFactory.create('physics'))
 	.setSystem('render', await systemFactory.create('render'))

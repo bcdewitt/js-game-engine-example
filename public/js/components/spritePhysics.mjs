@@ -13,6 +13,8 @@ class SpritePhysicsComponent extends Game.Component {
 		this.spdY = 0
 	}
 	get [_spriteComp]() { return this[_entity].getComponent('sprite') }
+	get flipped() { this[_spriteComp].flipped }
+	set flipped(val) { this[_spriteComp].flipped = val }
 	get x() { return this[_spriteComp].x }
 	set x(val) { this[_spriteComp].x = val }
 	get y() { return this[_spriteComp].y }

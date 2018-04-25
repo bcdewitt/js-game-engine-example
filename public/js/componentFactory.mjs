@@ -8,8 +8,10 @@ import createSpriteSound from './components/spriteSound.mjs'
 import createBeing from './components/being.mjs'
 import createState from './components/state.mjs'
 import createHealth from './components/health.mjs'
+import createAi from './components/ai.mjs'
 
 export default (componentFactory) => componentFactory
+	.set('ai', createAi)
 	.set('camera', createCamera)
 	.set('staticPhysicsBody', createStaticPhysicsBody)
 	.set('spawner', createSpawner)

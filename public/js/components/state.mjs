@@ -9,6 +9,8 @@ class StateComponent extends Game.Component {
 			lastUpdate: null,
 			grounded: false,
 			groundHit: false,
+			wallCollided: false,
+			atEdge: false,
 		})
 		this[_state] = initialState
 	}

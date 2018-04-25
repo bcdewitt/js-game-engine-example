@@ -15,6 +15,10 @@ export default async (systemName, { system }) => system
 		nonstaticComponents.forEach((c) => {
 			const state = c.getParentEntity().getComponent('state')
 			const wasGrounded = state.grounded
+			const wasWallCollided = state.wallCollided
+			const wasAtEdge = state.atEdge
+			state.wallCollided = false
+			state.atEdge = false
 			state.grounded = false // Only set to true after a collision is detected
 
 			c.accY = GRAVITY // Add gravity (limit to 10)
@@ -56,24 +60,35 @@ export default async (systemName, { system }) => system
 						if (deltaY > 0) projectionY *= -1
 
 						c.y += projectionY // Apply "projection vector" to rect1
-						if (c.spdY > 0 && deltaY > 0) c.spdY = 0
-						if (c.spdY < 0 && deltaY < 0) c.spdY = 0
+						if (c.spdY > 0 && deltaY > 0 || c.spdY < 0 && deltaY < 0) c.spdY = 0
 
 						if (projectionY < 0) {
-							if (!wasGrounded) { state.groundHit = true } else { state.groundHit = false }
+							state.groundHit = !wasGrounded
 							state.grounded = true
-							if (c.spdX > 0) {
-								c.spdX = Math.max(c.spdX - (FRICTION / time), 0)
-							} else {
-								c.spdX = Math.min(c.spdX + (FRICTION / time), 0)
-							}
+							c.spdX = c.spdX > 0
+								? Math.max(c.spdX - (FRICTION / time), 0)
+								: Math.min(c.spdX + (FRICTION / time), 0)
 						}
 					} else {
 						if (deltaX > 0) projectionX *= -1
 
 						c.x += projectionX // Apply "projection vector" to rect1
-						if (c.spdX > 0 && deltaX > 0) c.spdX = 0
-						if (c.spdX < 0 && deltaX < 0) c.spdX = 0
+						if (c.spdX > 0 && deltaX > 0 || c.spdX < 0 && deltaX < 0) c.spdX = 0
+						state.wallCollided = !wasAtEdge && !wasWallCollided
+					}
+
+					// Edge Detection
+					if (state.grounded) {
+						const edgeAbsDeltaX = absDeltaX + c.width
+						const edgeAbsDeltaY = absDeltaY - 1
+						if (
+							!(
+								(halfWidthSum > edgeAbsDeltaX) &&
+								(halfHeightSum > edgeAbsDeltaY)
+							)
+						) {
+							state.atEdge = !wasAtEdge && !wasWallCollided
+						}
 					}
 				}
 			})

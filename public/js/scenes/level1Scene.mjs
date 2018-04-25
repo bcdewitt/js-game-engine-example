@@ -1,5 +1,6 @@
 export default async (sceneName, { scene, systemFactory, entityFactory, tiledMap }) => scene
 	.setSystem('spawn', await systemFactory.create('spawn'))
+	.setSystem('ai', await systemFactory.create('ai'))
 	.setSystem('update', await systemFactory.create('update'))
 	.setSystem('physics', await systemFactory.create('physics'))
 	.setSystem('render', await systemFactory.create('render'))

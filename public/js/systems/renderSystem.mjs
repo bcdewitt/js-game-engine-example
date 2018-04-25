@@ -6,9 +6,21 @@ export default async (systemName, { system, tiledMap, entityFactory }) => {
 		{
 			img: 'img/monster.png',
 			x: 0,
-			y: 0,
+			y: 1,
 			width: 14,
-			height: 26
+			height: 23
+		}, {
+			img: 'img/monster.png',
+			x: 16,
+			y: 0,
+			width: 13,
+			height: 24
+		}, {
+			img: 'img/monster.png',
+			x: 32,
+			y: 1,
+			width: 15,
+			height: 23
 		}, {
 			img: 'img/tankSheet.png',
 			x: 0,
@@ -84,8 +96,7 @@ export default async (systemName, { system, tiledMap, entityFactory }) => {
 				followPlayer: true
 			}))
 
-			/*
-			// Uncomment this to add a smaller camera at the top
+			// Add a smaller camera at the top
 			currentTarget.addEntity(entityFactory.create('Camera', {
 				x: canvas.width - canvas.width / 4, // Matching width
 				y: 0,
@@ -95,9 +106,8 @@ export default async (systemName, { system, tiledMap, entityFactory }) => {
 				mapY: 920,
 				mapWidth: canvas.width / 2,
 				mapHeight: canvas.height / 2,
-				followPlayer: false
+				followPlayer: true
 			}))
-			*/
 		})
 
 		// Set up indexes
@@ -157,7 +167,7 @@ export default async (systemName, { system, tiledMap, entityFactory }) => {
 						y: sprite.y - c.mapY,
 						width: frame.width,
 						height: frame.height,
-						sx: frame.x,
+						sx: !sprite.flipped ? frame.x : img.width - frame.x - frame.width,
 						sy: frame.y
 					}
 
