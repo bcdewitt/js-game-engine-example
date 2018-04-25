@@ -2419,7 +2419,8 @@ var createRenderSystem = async (systemName, { system, tiledMap, entityFactory })
 				mapY: 820,
 				mapWidth: parseInt(canvas.width / 8),
 				mapHeight: parseInt(canvas.height / 8),
-				followPlayer: true
+				followPlayer: true,
+				showHUD: true,
 			}));
 
 			// Add a smaller camera at the top
@@ -2432,7 +2433,8 @@ var createRenderSystem = async (systemName, { system, tiledMap, entityFactory })
 				mapY: 920,
 				mapWidth: canvas.width / 2,
 				mapHeight: canvas.height / 2,
-				followPlayer: true
+				followPlayer: true,
+				showHUD: false,
 			}));
 		})
 
@@ -2531,15 +2533,17 @@ var createRenderSystem = async (systemName, { system, tiledMap, entityFactory })
 						}
 
 						// Health bar
-						const health = defaultPlayerEntity.getComponent('health');
-						const hp = Math.max(health.hp, 0);
-						const barHeight = 32;
-						const barTop = mapHeight - 48 - 20;
-						const barBottom = barTop + barHeight + 1;
-						const barY = barBottom - (hp / health.maxHP * barHeight);
-						tempCtx.fillStyle = 'white';
-						tempCtx.fillRect(10, barY, 8, barBottom - barY);
-						tempCtx.drawImage(images['img/healthMeter.png'], 10, barTop);
+						if (c.showHUD) {
+							const health = defaultPlayerEntity.getComponent('health');
+							const hp = Math.max(health.hp, 0);
+							const barHeight = 32;
+							const barTop = mapHeight - 48 - 20;
+							const barBottom = barTop + barHeight + 1;
+							const barY = barBottom - (hp / health.maxHP * barHeight);
+							tempCtx.fillStyle = 'white';
+							tempCtx.fillRect(10, barY, 8, barBottom - barY);
+							tempCtx.drawImage(images['img/healthMeter.png'], 10, barTop);
+						}
 
 						// Draw the temporary canvas to the main canvas (position and fit to camera bounds)
 						context.drawImage(tempCanvas, 0, 0, mapWidth, mapHeight, x, y, width, height);
@@ -5018,6 +5022,7 @@ class CameraComponent extends game$1.Component {
 			mapHeight: 0,
 			following: null,
 			followPlayer: false,
+			showHUD: false,
 		}, data);
 	}
 	get mapHalfWidth() { return this.mapWidth / 2 }
@@ -5086,7 +5091,7 @@ class SpriteComponent extends game$1.Component {
 			height: 0,
 			flipped: false,
 			frame: null,
-			layer: null,
+			layer: null
 		}, data);
 	}
 

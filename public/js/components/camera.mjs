@@ -14,6 +14,7 @@ class CameraComponent extends Game.Component {
 			mapHeight: 0,
 			following: null,
 			followPlayer: false,
+			showHUD: false,
 		}, data)
 	}
 	get mapHalfWidth() { return this.mapWidth / 2 }
