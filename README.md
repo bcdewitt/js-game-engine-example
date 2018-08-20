@@ -1,7 +1,5 @@
 # JS Game Engine Usage Example #
 
-## What is this repository for? ##
-
 An incomplete example game used to test the flexibility of my custom game engine's API/features.
 
 ## Setup
